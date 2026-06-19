@@ -1,0 +1,19 @@
+/* Montserrat Font Entegrasyonu */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* GÖREV ADAMI KURUMSAL RENKLERİ */
+@theme {
+  --color-brand-orange: #FF9E18;
+  --color-brand-orange-hover: #E68D15;
+  
+  --color-brand-navy: #1F2A44;
+  --color-brand-navy-light: #2A385A;
+}
+
+body {
+  font-family: 'Montserrat', sans-serif;
+  background-color: #F8FAFC; /* Çok hafif gri, Dashboard arka planı için temiz bir görünüm */
+}
