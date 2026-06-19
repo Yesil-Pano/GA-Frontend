@@ -4,7 +4,7 @@ import axios from 'axios';
 
 // Backend projenizin çalıştığı adresi buraya yazıyoruz (Genelde localhost:5000 veya benzeri olur)
 const api = axios.create({
-  baseURL: 'http://localhost:5112/api', 
+  baseURL: window.location.hostname === 'localhost' ? 'http://localhost:5112' : '/api',
   headers: {
     'Content-Type': 'application/json',
   },
