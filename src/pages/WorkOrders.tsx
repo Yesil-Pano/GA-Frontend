@@ -21,6 +21,8 @@ interface WorkOrderData {
   operationUserName: string;
   openedByUserName: string;
   assignedToUserName: string;
+  isPeriodic?: boolean;
+  recurrenceInterval?: string;
 }
 
 interface LookupData {
@@ -37,9 +39,7 @@ export default function WorkOrders() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lookups, setLookups] = useState<LookupData>({ personnel: [], types: [], categories: [] });
 
-  // 🌀 İŞ EMİRLERİ İÇİN CANLI LOADING STATE
   const [isLoading, setIsLoading] = useState(true);
-
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrderData | null>(null);
 
@@ -47,7 +47,8 @@ export default function WorkOrders() {
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
     priority: 'Orta', workType: 'Arıza', workCategory: 'Arıza Bildirimi',
     startDate: '2026-06-19T12:00', endDate: '2026-06-20T12:00', lat: 39.92, lng: 32.85,
-    operationUserId: '', openedByUserId: '', assignedToUserId: ''
+    operationUserId: '', openedByUserId: '', assignedToUserId: '',
+    isPeriodic: false, recurrenceInterval: 'None'
   });
 
   const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
@@ -64,7 +65,7 @@ export default function WorkOrders() {
   useEffect(() => {
     let isMounted = true;
     const loadInitialData = async () => {
-      setIsLoading(true); // Spinner'ı başlat
+      setIsLoading(true);
       try {
         const [ordersRes, lookupsRes] = await Promise.all([
           api.get('/workorders'),
@@ -85,7 +86,7 @@ export default function WorkOrders() {
       } catch (error) {
         console.error("Veri yükleme hatası:", error);
       } finally {
-        if (isMounted) setIsLoading(false); // Spinner'ı durdur
+        if (isMounted) setIsLoading(false);
       }
     };
     loadInitialData();
@@ -103,7 +104,8 @@ export default function WorkOrders() {
         workType: formData.workType, workCategory: formData.workCategory,
         startDate: new Date(formData.startDate).toISOString(), endDate: new Date(formData.endDate).toISOString(),
         latitude: Number(formData.lat), longitude: Number(formData.lng),
-        operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null, assignedToUserId: formData.assignedToUserId || null
+        operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null, assignedToUserId: formData.assignedToUserId || null,
+        isPeriodic: formData.isPeriodic, recurrenceInterval: formData.recurrenceInterval
       });
       setIsFormOpen(false);
       fetchOrders();
@@ -115,40 +117,49 @@ export default function WorkOrders() {
     }
   };
 
+  // REVIZYON FİLTRE MANTIĞI[cite: 3]
   const filteredOrders = orders
-    .filter(order => filter === 'Tümü' || order.status === filter)
-    .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()));
+    .filter(order => {
+      if (filter === 'Tümü') return true;
+      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '';
+      if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
+      if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
+      return order.status === filter;
+    })
+    .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()) || order.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
     <div className="h-full flex flex-col p-4 bg-white relative overflow-hidden">
       
+      {/* ÜST ARAMA PANELİ */}
       <div className="mb-4">
         <h1 className="text-xl font-bold text-brand-navy mb-3">İş Emirleri</h1>
         <div className="flex gap-2">
           <input 
             type="text" placeholder="Arama" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 border border-slate-300 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-brand-orange outline-none shadow-inner" 
+            className="w-full border border-slate-300 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-brand-orange outline-none shadow-inner" 
           />
         </div>
       </div>
 
-      <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3">
-        {['Tümü', 'Bekliyor', 'Devam Ediyor'].map((status) => (
+      {/* YENİ GELİŞMİŞ FİLTRE BUTONLARI[cite: 3] */}
+      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-slate-200 pb-3">
+        {['Tümü', 'Atanmamış', 'Bekliyor', 'Devam Ediyor', 'Tamamlanan', 'İptal Edilen'].map((status) => (
           <button
             key={status} onClick={() => setFilter(status)}
-            className={`px-3 py-1.5 rounded text-xs font-semibold shadow-sm transition ${
+            className={`px-2.5 py-1.5 rounded text-xs font-semibold shadow-sm transition ${
               filter === status ? 'bg-brand-orange text-white' : 'bg-white border border-slate-200 text-brand-navy hover:bg-slate-50'
             }`}
           >
             {status}
           </button>
         ))}
-        <button onClick={() => setIsFormOpen(true)} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700 ml-auto transition">
+        <button onClick={() => setIsFormOpen(true)} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700 ml-auto transition shrink-0">
           + İş Emri Ekle
         </button>
       </div>
       
-      {/* İŞ EMRİ KARTLARI LİSTESİ (SİLİNEN TÜM SINIFLAR VE YER TUTUCULAR EKSİKSİZ DOLDURULDU) */}
+      {/* İŞ EMRİ LİSTELEME ALANI */}
       <div className="flex-1 space-y-4 overflow-y-auto pr-2 pb-4 custom-scrollbar">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center pt-20 space-y-3">
@@ -159,16 +170,12 @@ export default function WorkOrders() {
             <span className="text-xs font-bold text-slate-400 tracking-wide animate-pulse">İş Emirleri Yükleniyor...</span>
           </div>
         ) : filteredOrders.length === 0 ? (
-          <p className='text-sm text-slate-500 text-center mt-10'>Henüz veri yok veya yükleniyor...</p>
+          <p className='text-sm text-slate-500 text-center mt-10'>Aranan kriterde iş emri bulunamadı.</p>
         ) : (
           filteredOrders.map((order) => (
             <div 
               key={order.id} 
-              onClick={() => {
-                if (order.position && order.position[0] && order.position[1]) {
-                  setFocusedMarkerPosition([...order.position]);
-                }
-              }}
+              onClick={() => order.position && setFocusedMarkerPosition([...order.position])}
               className={`cursor-pointer bg-white p-4 rounded-xl shadow-md border border-slate-200 relative transition-all hover:border-brand-orange hover:shadow-lg ${
                 order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''
               }`}
@@ -176,8 +183,8 @@ export default function WorkOrders() {
               <h3 className="text-base font-bold text-brand-navy mb-2">Nokta Adı: {order.customerName || order.title}</h3>
               <div className="space-y-1.5 text-xs mb-3">
                 <div className="flex"><span className="w-1/3 text-slate-500 font-medium">İş Tipi:</span><span className="w-2/3 text-slate-800 font-bold">{order.type}</span></div>
-                <div className="flex"><span className="w-1/3 text-slate-500 font-medium">Açıklama:</span><span className="w-2/3 text-slate-600 truncate">{order.description}</span></div>
                 <div className="flex"><span className="w-1/3 text-slate-500 font-medium">Öncelik:</span><span className={`w-2/3 font-bold ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority}</span></div>
+                <div className="flex"><span className="w-1/3 text-slate-500 font-medium">Durum:</span><span className="w-2/3 font-bold text-blue-600">{order.status}</span></div>
               </div>
 
               <div className="flex justify-end pt-2.5 border-t border-slate-100">
@@ -197,41 +204,73 @@ export default function WorkOrders() {
         )}
       </div>
 
-      {/* SAĞDAN KAYAN FORM PANELİ */}
+      {/* SAĞDAN KAYAN FORM PANELİ[cite: 2] */}
       <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
         <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2"><span className="text-emerald-600 font-bold">Formu</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm truncate max-w-50">{formData.customerName || 'Yeni İş Emri'}</span></div>
           <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
         </div>
+        
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">İş Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx}>{t}</option>)}</select></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">İş Kategorisi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx}>{c}</option>)}</select></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">İş Öncelik Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Başlık / İş Özeti</label><input required className="w-full border rounded-lg p-2.5" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Müşteri / Pano Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx}>{t}</option>)}</select></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx}>{c}</option>)}</select></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Öncelik Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">Başlık / İş Özeti</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">Müşteri / Pano Adı</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} /></div>
+          
           <div className="flex gap-4">
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Başlangıç</label><input type="datetime-local" className="w-full border rounded-lg p-2.5" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Bitiş</label><input type="datetime-local" className="w-full border rounded-lg p-2.5" value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Planlanan Başlangıç</label><input type="datetime-local" className="w-full border border-slate-300 rounded-lg p-2.5" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Planlanan Bitiş</label><input type="datetime-local" className="w-full border border-slate-300 rounded-lg p-2.5" value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} /></div>
           </div>
           <div className="flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border rounded-lg p-2 bg-white" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
           </div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Açıklama</label><textarea className="w-full border rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Mobil Açıklama</label><textarea className="w-full border rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Açık Adres</label><textarea required className="w-full border rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Sistem Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Saha Mobil Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+          
+          {/* PERİYODİK İŞ AYAR PANELİ[cite: 7] */}
+          <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
+            <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500" checked={formData.isPeriodic} onChange={e => setFormData({...formData, isPeriodic: e.target.checked})} />
+              <span>Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)</span>
+            </label>
+            {formData.isPeriodic && (
+              <div>
+                <label className="block text-[11px] font-bold text-emerald-700 mb-1">Tekrarlanma Döngüsü Sıklığı</label>
+                <select className="w-full border border-emerald-200 rounded-lg p-2 bg-white text-xs font-semibold text-slate-700" value={formData.recurrenceInterval} onChange={e => setFormData({...formData, recurrenceInterval: e.target.value})}>
+                  <option value="Haftalik">Her Hafta Otomatik Açılsın</option>
+                  <option value="Aylik">Her Ay Otomatik Açılsın</option>
+                  <option value="Yillik">Her Yıl Otomatik Açılsın</option>
+                </select>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label><select className="w-full border rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
           </div>
+          
           <div className="flex gap-3 pt-4 border-t">
             <button type="button" onClick={() => setIsFormOpen(false)} className="flex-1 border border-slate-300 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-50 transition">İptal</button>
+            
+            {/* 💡 SINTAKS HATASI DÜZELTİLEN YER: Fragment kapaması tertemiz yapıldı */}
             <button type="submit" disabled={isSubmitting} className={`flex-1 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-xl shadow-md transition ${isSubmitting ? 'bg-emerald-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
               {isSubmitting ? (
-                <><svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Kaydediliyor...</span></>
-              ) : (<span>✓ Kaydet</span>)}
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Kaydediliyor...</span>
+                </>
+              ) : (
+                <span>✓ Kaydet</span>
+              )}
             </button>
           </div>
         </form>
@@ -263,7 +302,7 @@ export default function WorkOrders() {
               <div className="col-span-2 grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operasyon Sorumlusu</label><div className="font-bold text-slate-700 truncate">{selectedOrder.operationUserName}</div></div>
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İş Açan Yetkili</label><div className="font-bold text-slate-700 truncate">{selectedOrder.openedByUserName}</div></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Atanan Sahacı</label><div className="font-bold text-blue-600 bg-blue-50/50 border border-blue-100 rounded px-2 py-0.5 inline-block max-w-full truncate">👷 {selectedOrder.assignedToUserName}</div></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Atanan Sahacı</label><div className="font-bold text-blue-600 bg-blue-50/50 border border-blue-100 rounded px-2 py-0.5 inline-block max-w-full truncate">👷 {selectedOrder.assignedToUserName || 'Sahacı Atanmamış'}</div></div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end"><button onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button></div>
