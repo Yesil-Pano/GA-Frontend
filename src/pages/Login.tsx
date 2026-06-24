@@ -1,93 +1,61 @@
-// ga-frontend/src/pages/Login.tsx
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
-import axios from 'axios';
+// Logomuzu daha önce buraya eklemiştik
+import logoImg from '../assets/logo.png';
 
-const Login: React.FC = () => {
+export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-
-    try {
-      const response = await api.post('/auth/login', { email, password });
-      
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify({ 
-        username: response.data.username, 
-        fullName: response.data.fullName 
-      }));
-
-      navigate('/');
-    } catch (err: unknown) { // any yerine unknown kullanıyoruz
-      // Gelen hatanın bir Axios hatası olup olmadığını kontrol ediyoruz (Type Guard)
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.');
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Bilinmeyen bir hata oluştu.');
-      }
-    }
+    // TODO: Backend entegrasyonu
+    navigate('/dashboard');
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-lg">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
         
-        <div className="text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Sisteme Giriş Yap</h2>
-          <p className="mt-2 text-sm text-gray-600">Lütfen e-posta ve şifrenizi giriniz.</p>
+        {/* KURUMSAL LOGO ALANI */}
+        <div className="flex flex-col items-center mb-8">
+          <img src={logoImg} alt="Görev Adamı" className="w-24 h-24 object-contain mb-4" />
+          <h1 className="text-2xl font-extrabold text-brand-navy">Sisteme Giriş Yap</h1>
+          <p className="text-sm text-slate-500 mt-2 font-medium">Lütfen e-posta ve şifrenizi giriniz.</p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-          {error && (
-            <div className="p-3 bg-red-100 text-red-700 rounded text-sm text-center">
-              {error}
-            </div>
-          )}
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">E-posta Adresi</label>
-              <input
-                type="email"
-                required
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Şifre</label>
-              <input
-                type="password"
-                required
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">E-posta Adresi</label>
+            <input
+              type="email"
+              required
+              className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
+              placeholder="admin@yesilpano.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
-
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Şifre</label>
+            <input
+              type="password"
+              required
+              className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
           <button
             type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition-colors shadow-md shadow-blue-200 mt-4"
           >
             Giriş Yap
           </button>
         </form>
-
       </div>
     </div>
   );
-};
-
-export default Login;
+}

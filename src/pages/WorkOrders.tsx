@@ -1,5 +1,5 @@
 // src/pages/WorkOrders.tsx
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
@@ -32,16 +32,19 @@ interface LookupData {
 }
 
 export default function WorkOrders() {
+  // --- STATELER ---
   const [filter, setFilter] = useState('Tümü');
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lookups, setLookups] = useState<LookupData>({ personnel: [], types: [], categories: [] });
-
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrderData | null>(null);
+  
+  // 🚀 EKSİK OLAN STATE EKLENDİ (Toplu İşlemler İçin)
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
@@ -53,6 +56,36 @@ export default function WorkOrders() {
 
   const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
 
+  // --- MANTIK SIRALAMASI DÜZELTİLDİ ---
+  // 1. Önce veriler süzülür
+  const filteredOrders = orders
+    .filter(order => {
+      if (filter === 'Tümü') return true;
+      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '';
+      if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
+      if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
+      return order.status === filter;
+    })
+    .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()) || order.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // 2. Sonra seçim metotları bu süzülmüş veriyi (filteredOrders) kullanır
+  const handleSelectAll = () => {
+    if (selectedOrders.length === filteredOrders.length && filteredOrders.length > 0) {
+      setSelectedOrders([]); // Seçimlerin hepsini kaldır
+    } else {
+      setSelectedOrders(filteredOrders.map(o => o.id)); // Sayfadaki her şeyi seç
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    if (selectedOrders.includes(id)) {
+      setSelectedOrders(prev => prev.filter(orderId => orderId !== id));
+    } else {
+      setSelectedOrders(prev => [...prev, id]);
+    }
+  };
+
+  // --- VERİ ÇEKME VE GÖNDERME ---
   const fetchOrders = async () => {
     try {
       const response = await api.get('/workorders');
@@ -117,50 +150,71 @@ export default function WorkOrders() {
     }
   };
 
-  // REVIZYON FİLTRE MANTIĞI[cite: 3]
-  const filteredOrders = orders
-    .filter(order => {
-      if (filter === 'Tümü') return true;
-      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '';
-      if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
-      if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
-      return order.status === filter;
-    })
-    .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()) || order.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
-
   return (
-    <div className="h-full flex flex-col p-4 bg-white relative overflow-hidden">
+    <div className="h-full flex flex-col p-6 bg-slate-50 relative overflow-hidden">
       
-      {/* ÜST ARAMA PANELİ */}
-      <div className="mb-4">
-        <h1 className="text-xl font-bold text-brand-navy mb-3">İş Emirleri</h1>
-        <div className="flex gap-2">
-          <input 
-            type="text" placeholder="Arama" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full border border-slate-300 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-brand-orange outline-none shadow-inner" 
-          />
-        </div>
-      </div>
+      <h1 className="text-2xl font-extrabold text-brand-navy mb-4">İş Emirleri</h1>
 
-      {/* YENİ GELİŞMİŞ FİLTRE BUTONLARI[cite: 3] */}
-      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-slate-200 pb-3">
-        {['Tümü', 'Atanmamış', 'Bekliyor', 'Devam Ediyor', 'Tamamlanan', 'İptal Edilen'].map((status) => (
-          <button
-            key={status} onClick={() => setFilter(status)}
-            className={`px-2.5 py-1.5 rounded text-xs font-semibold shadow-sm transition ${
-              filter === status ? 'bg-brand-orange text-white' : 'bg-white border border-slate-200 text-brand-navy hover:bg-slate-50'
-            }`}
+      {/* ÜST ARAMA VE FİLTRE PANELİ (Kompakt ve Şık) */}
+      <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4">
+        <div className="flex flex-1 gap-4 items-center min-w-75">
+          {/* Arama Inputu */}
+          <input 
+            type="text" 
+            placeholder="İş emri veya nokta ara..." 
+            value={searchTerm} 
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20"
+          />
+          
+          {/* Açılır Liste Filtre (Dropdown) */}
+          <select 
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
           >
-            {status}
-          </button>
-        ))}
-        <button onClick={() => setIsFormOpen(true)} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700 ml-auto transition shrink-0">
+            <option value="Tümü">Tüm İşler</option>
+            <option value="Bekliyor">Bekliyor</option>
+            <option value="Devam Ediyor">Devam Ediyor</option>
+            <option value="Tamamlanan">Tamamlanan</option>
+            <option value="İptal Edilen">İptal Edilen</option>
+            <option value="Atanmamış">Atanmamış İşler</option>
+          </select>
+        </div>
+
+        <button onClick={() => setIsFormOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-lg transition-colors shadow-sm whitespace-nowrap">
           + İş Emri Ekle
         </button>
       </div>
+
+      {/* TOPLU İŞLEM BAR'I (Sadece seçim yapıldığında görünür) */}
+      {selectedOrders.length > 0 && (
+        <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 flex justify-between items-center shadow-md">
+          <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
+          <div className="flex gap-3">
+            <button className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+              ✓ Toplu Onayla
+            </button>
+            <button className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+              🗑 Toplu Sil
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TÜMÜNÜ SEÇ CHECKBOX SATIRI */}
+      <div className="flex items-center gap-3 mb-3 px-2">
+        <input 
+          type="checkbox" 
+          className="w-5 h-5 cursor-pointer accent-brand-orange"
+          checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0}
+          onChange={handleSelectAll}
+        />
+        <span className="text-sm font-bold text-slate-600">Tümünü Seç</span>
+      </div>
       
       {/* İŞ EMRİ LİSTELEME ALANI */}
-      <div className="flex-1 space-y-4 overflow-y-auto pr-2 pb-4 custom-scrollbar">
+      <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2 pb-4 custom-scrollbar">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center pt-20 space-y-3">
             <svg className="animate-spin h-8 w-7 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -176,35 +230,48 @@ export default function WorkOrders() {
             <div 
               key={order.id} 
               onClick={() => order.position && setFocusedMarkerPosition([...order.position])}
-              className={`cursor-pointer bg-white p-4 rounded-xl shadow-md border border-slate-200 relative transition-all hover:border-brand-orange hover:shadow-lg ${
+              className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${
                 order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''
               }`}
             >
-              <h3 className="text-base font-bold text-brand-navy mb-2">Nokta Adı: {order.customerName || order.title}</h3>
-              <div className="space-y-1.5 text-xs mb-3">
-                <div className="flex"><span className="w-1/3 text-slate-500 font-medium">İş Tipi:</span><span className="w-2/3 text-slate-800 font-bold">{order.type}</span></div>
-                <div className="flex"><span className="w-1/3 text-slate-500 font-medium">Öncelik:</span><span className={`w-2/3 font-bold ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority}</span></div>
-                <div className="flex"><span className="w-1/3 text-slate-500 font-medium">Durum:</span><span className="w-2/3 font-bold text-blue-600">{order.status}</span></div>
-              </div>
+              {/* KART CHECKBOX */}
+              <input 
+                type="checkbox" 
+                className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0"
+                checked={selectedOrders.includes(order.id)}
+                onChange={(e) => {
+                  e.stopPropagation(); // Karta tıklama (haritaya gitme) eventini engeller
+                  handleSelectOne(order.id);
+                }}
+              />
 
-              <div className="flex justify-end pt-2.5 border-t border-slate-100">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation(); 
-                    setSelectedOrder(order);
-                    setIsDetailModalOpen(true);
-                  }}
-                  className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition shadow-sm"
-                >
-                  🔎 Detayları Gör
-                </button>
+              <div className="flex-1">
+                <h3 className="text-base font-bold text-brand-navy mb-2">Nokta Adı: {order.customerName || order.title}</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs mb-3">
+                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">İş Tipi:</span><span className="text-slate-800 font-bold">{order.type}</span></div>
+                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Öncelik:</span><span className={`font-bold ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority}</span></div>
+                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Durum:</span><span className="font-bold text-blue-600">{order.status}</span></div>
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-slate-100">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation(); 
+                      setSelectedOrder(order);
+                      setIsDetailModalOpen(true);
+                    }}
+                    className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm"
+                  >
+                    🔎 Detayları Gör
+                  </button>
+                </div>
               </div>
             </div>
           ))
         )}
       </div>
 
-      {/* SAĞDAN KAYAN FORM PANELİ[cite: 2] */}
+      {/* SAĞDAN KAYAN FORM PANELİ */}
       <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
         <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2"><span className="text-emerald-600 font-bold">Formu</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm truncate max-w-50">{formData.customerName || 'Yeni İş Emri'}</span></div>
@@ -230,7 +297,6 @@ export default function WorkOrders() {
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Saha Mobil Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
           
-          {/* PERİYODİK İŞ AYAR PANELİ[cite: 7] */}
           <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
             <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
               <input type="checkbox" className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500" checked={formData.isPeriodic} onChange={e => setFormData({...formData, isPeriodic: e.target.checked})} />
@@ -257,8 +323,6 @@ export default function WorkOrders() {
           
           <div className="flex gap-3 pt-4 border-t">
             <button type="button" onClick={() => setIsFormOpen(false)} className="flex-1 border border-slate-300 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-50 transition">İptal</button>
-            
-            {/* 💡 SINTAKS HATASI DÜZELTİLEN YER: Fragment kapaması tertemiz yapıldı */}
             <button type="submit" disabled={isSubmitting} className={`flex-1 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-xl shadow-md transition ${isSubmitting ? 'bg-emerald-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
               {isSubmitting ? (
                 <>

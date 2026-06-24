@@ -4,12 +4,13 @@ import { useState, useEffect } from 'react';
 import MapView from '../components/MapView';
 import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
+import logoImg from '../assets/logo.png';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
   <div className="flex items-center h-20 border-b border-brand-navy-light px-5 overflow-hidden whitespace-nowrap">
-    <div className="w-10 h-10 min-w-10 rounded-full flex items-center justify-center font-bold text-brand-orange text-2xl border-2 border-brand-orange transition-transform duration-300">
-      G
-    </div>
+    {/* 🚀 Eski sarı yuvarlak yerine gelen gıcır gıcır gerçek logonuz */}
+    <img src={logoImg} alt="Görev Adamı Logo" className="w-10 h-10 min-w-10 object-contain transition-transform duration-300" />
+
     <div className={`flex flex-col ml-3 transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
       <h1 className="text-xl font-bold tracking-wider text-white leading-tight">GÖREV ADAMI</h1>
       <p className='text-[8px] text-brand-orange uppercase tracking-wider font-semibold'>Yeşil Pano Ayak İzi</p>
