@@ -37,6 +37,7 @@ function App() {
         >
           {/* Outlet içine dolacak olan alt sayfalar */}
           // App.tsx içinde ilgili kısım
+          <Route path="dashboard" element={<Navigate to="/" replace />} />
           <Route index element={<Dashboard />} />          
           <Route path="work-orders" element={<WorkOrders />} />
           <Route path="map" element={<MapPage />} />

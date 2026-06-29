@@ -11,7 +11,7 @@ export default function Login() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // TODO: Backend entegrasyonu
-    navigate('/dashboard');
+    navigate('/');
   };
 
   return (
