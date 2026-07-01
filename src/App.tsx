@@ -1,5 +1,4 @@
 // ga-frontend/src/App.tsx
-
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
@@ -13,6 +12,7 @@ import Surveys from './pages/Surveys';
 import Timesheet from './pages/Timesheet';
 import Planning from './pages/Planning';
 import Reports from './pages/Reports';
+import AdminPanel from './pages/AdminPanel';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem('token');
@@ -23,31 +23,20 @@ function App() {
   return (
     <Router>
       <Routes>
-        {/* Giriş Ekranı (Layout'tan bağımsız, tam ekran) */}
         <Route path="/login" element={<Login />} />
-        
-        {/* Güvenli Alan (MainLayout içine gömülü sayfalar) */}
-        <Route 
-          path="/" 
-          element={
-            <PrivateRoute>
-              <MainLayout />
-            </PrivateRoute>
-          }
-        >
-          {/* Outlet içine dolacak olan alt sayfalar */}
-          // App.tsx içinde ilgili kısım
-          <Route path="dashboard" element={<Navigate to="/" replace />} />
-          <Route index element={<Dashboard />} />          
+        <Route path="/" element={<PrivateRoute><MainLayout /></PrivateRoute>}>
+          <Route index element={<Dashboard />} />
+          <Route path="dashboard" element={<Navigate to="/" replace />} /> 
           <Route path="work-orders" element={<WorkOrders />} />
           <Route path="map" element={<MapPage />} />
           <Route path="users" element={<Users />} />
           <Route path="settings" element={<div>Sistem Ayarları</div>} />
-          <Route path="/teams" element={<Teams />} />
-          <Route path="/surveys" element={<Surveys />} />
-          <Route path="/timesheet" element={<Timesheet />} />
-          <Route path="/planning" element={<Planning />} />
-          <Route path="/reports" element={<Reports />} />
+          <Route path="teams" element={<Teams />} />
+          <Route path="surveys" element={<Surveys />} />
+          <Route path="timesheet" element={<Timesheet />} />
+          <Route path="planning" element={<Planning />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="admin-panel" element={<AdminPanel />} />
         </Route>
       </Routes>
     </Router>

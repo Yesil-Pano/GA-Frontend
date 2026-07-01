@@ -26,6 +26,9 @@ const Sidebar: React.FC = () => {
     { name: 'Harita / Konumlar', path: '/map', icon: <MapPin size={20} /> },
     { name: 'Kullanıcılar', path: '/users', icon: <Users size={20} /> },
     { name: 'Ayarlar', path: '/settings', icon: <Settings size={20} /> },
+    { name: 'Takımlar', path: '/teams', icon: <Briefcase size={20} /> },
+    { name: 'Anketler', path: '/surveys', icon: <Briefcase size={20} /> },
+    { name: 'Zaman Çizelgesi', path: '/timesheet', icon: <Briefcase size={20} /> },
   ];
 
   const handleLogout = () => {

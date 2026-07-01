@@ -1,12 +1,15 @@
 // src/pages/Teams.tsx
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
 interface TeamMemberData {
   id: string;
   name: string;
+  username: string; 
+  email: string;    
   project: string;
+  projectIds: string[]; 
   plate: string;
   phone: string;
   teamLeader: string;
@@ -24,78 +27,164 @@ interface AssignedWorkOrder {
   assignedToUserId: string | null;
 }
 
-const PROJECT_LIST = [
-  "Trugo Şarj İstasyonları",
-  "Unilever Algida",
-  "Astor",
-  "Yeşil Pano Projesi"
-];
+interface ProjectLookup {
+  id: string;
+  name: string;
+}
+
+interface TenantLookup {
+  id: string;
+  name: string;
+}
+
+interface AxiosErrorResponse {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+}
 
 export default function Teams() {
   const [searchTerm, setSearchTerm] = useState('');
   const [teams, setTeams] = useState<TeamMemberData[]>([]);
   const [allWorkOrders, setAllWorkOrders] = useState<AssignedWorkOrder[]>([]); 
+  const [projects, setProjects] = useState<ProjectLookup[]>([]);
+  const [globalTenants, setGlobalTenants] = useState<TenantLookup[]>([]); 
+  
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // 🌀 EKİPLER İÇİN CANLI LOADING STATE
   const [isLoading, setIsLoading] = useState(true);
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<TeamMemberData | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'jobs'>('details');
+  const [isEditingModal, setIsEditingModal] = useState(false); 
 
+  // 🚀 HARİTA: Form State'ine lat/lng eklendi (Ankara Merkez Default)
   const [formData, setFormData] = useState({
-    name: '', phone: '', teamLeader: '', project: PROJECT_LIST[0], plate: ''
+    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', tenantId: '', lat: 39.92077, lng: 32.85411
   });
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
+  // 🚀 HARİTA: Düzenleme Form State'ine lat/lng eklendi
+  const [editFormData, setEditFormData] = useState({
+    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', lat: 39.92077, lng: 32.85411
+  });
+  const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
 
   const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
 
-  const fetchTeamsData = async () => {
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+  if (token) {
     try {
-      const [teamsRes, ordersRes] = await Promise.all([
-        api.get('/teams'),
-        api.get('/workorders')
-      ]);
-      return { teams: teamsRes.data, orders: ordersRes.data };
-    } catch (error) {
-      console.error("Veriler yüklenirken hata oluştu:", error);
-      return null;
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(window.atob(base64));
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch (e) {
+      console.error(e);
     }
-  };
+  }
+
+  const reloadDataForSubmit = useCallback(async () => {
+    try {
+      const [teamsRes, ordersRes, lookupsRes] = await Promise.all([
+        api.get('/teams'),
+        api.get('/workorders'),
+        api.get('/teams/lookups')
+      ]);
+
+      setTeams(teamsRes.data);
+      setAllWorkOrders(ordersRes.data);
+      setProjects(lookupsRes.data);
+
+      if (isSuperAdmin) {
+        const tenantsRes = await api.get('/superadmin/tenants');
+        setGlobalTenants(tenantsRes.data);
+      }
+    } catch (error) {
+      console.error("Veri yenilenirken hata:", error);
+    }
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     let isMounted = true;
-    const loadInitialData = async () => {
-      setIsLoading(true); // Spinner'ı döndür
-      const data = await fetchTeamsData();
-      if (isMounted && data) {
-        setTeams(data.teams);
-        setAllWorkOrders(data.orders);
-      }
-      if (isMounted) setIsLoading(false); // Veri akışı bitince kapat
-    };
-    loadInitialData();
-    return () => { isMounted = false; };
-  }, []);
+    const initPageData = async () => {
+      setIsLoading(true);
+      try {
+        const [teamsRes, ordersRes, lookupsRes] = await Promise.all([
+          api.get('/teams'),
+          api.get('/workorders'),
+          api.get('/teams/lookups')
+        ]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+        let tenantList: TenantLookup[] = [];
+        if (isSuperAdmin) {
+          const tenantsRes = await api.get('/superadmin/tenants');
+          tenantList = tenantsRes.data;
+        }
+
+        if (isMounted) {
+          setTeams(teamsRes.data);
+          setAllWorkOrders(ordersRes.data);
+          setProjects(lookupsRes.data);
+          setGlobalTenants(tenantList);
+        }
+      } catch (error) {
+        console.error("İlk yükleme hatası:", error);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    initPageData();
+    return () => { isMounted = false; };
+  }, [isSuperAdmin]);
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await api.post('/teams', formData);
+      await api.post('/teams', {
+        ...formData,
+        latitude: formData.lat,
+        longitude: formData.lng,
+        projectIds: selectedProjectIds
+      });
       setIsFormOpen(false);
-      setFormData({ name: '', phone: '', teamLeader: '', project: PROJECT_LIST[0], plate: '' });
-      
-      const data = await fetchTeamsData();
-      if (data) {
-        setTeams(data.teams);
-        setAllWorkOrders(data.orders);
-      }
-    } catch (error) {
-      console.error("Kayıt hatası:", error);
-      alert("Ekip eklenemedi.");
+      setFormData({ name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', tenantId: '', lat: 39.92077, lng: 32.85411 });
+      setSelectedProjectIds([]);
+      await reloadDataForSubmit();
+    } catch (err) {
+      const error = err as AxiosErrorResponse;
+      console.error(error);
+      alert(error.response?.data?.message || "Ekip eklenemedi.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTeam) return;
+    setIsSubmitting(true);
+    try {
+      await api.put(`/teams/${selectedTeam.id}`, {
+        ...editFormData,
+        latitude: editFormData.lat,
+        longitude: editFormData.lng,
+        projectIds: editProjectIds
+      });
+      setIsEditingModal(false);
+      setIsDetailModalOpen(false);
+      await reloadDataForSubmit(); 
+    } catch (err) {
+      const error = err as AxiosErrorResponse;
+      console.error(error);
+      alert(error.response?.data?.message || "Değişiklikler kaydedilemedi.");
     } finally {
       setIsSubmitting(false);
     }
@@ -111,7 +200,6 @@ export default function Teams() {
   return (
     <div className="h-full flex flex-col p-4 bg-white relative overflow-hidden">
       
-      {/* ÜST ARAMA PANELİ */}
       <div className="mb-4 space-y-3">
         <div className="relative">
           <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
@@ -126,13 +214,8 @@ export default function Teams() {
             + Ekip Ekle
           </button>
         </div>
-        
-        <div className="text-center text-xs text-slate-500 font-bold tracking-wide">
-          Toplam Ekip Sayısı : {filteredTeams.length}
-        </div>
       </div>
 
-      {/* EKİP KARTLARI LİSTESİ */}
       <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar pb-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center pt-20 space-y-3">
@@ -170,7 +253,23 @@ export default function Teams() {
                   onClick={(e) => {
                     e.stopPropagation(); 
                     setSelectedTeam(team);
+                    
+                    setEditFormData({
+                      name: team.name,
+                      username: team.username,
+                      email: team.email,
+                      password: '', 
+                      phone: team.phone,
+                      teamLeader: team.teamLeader === '-' ? '' : team.teamLeader,
+                      plate: team.plate === '-' ? '' : team.plate,
+                      // 🚀 HARİTA: Tıklanan kişinin koordinatlarını form'a bas
+                      lat: team.position[0] || 39.92077,
+                      lng: team.position[1] || 32.85411
+                    });
+                    setEditProjectIds(team.projectIds || []);
+
                     setActiveTab('details'); 
+                    setIsEditingModal(false); 
                     setIsDetailModalOpen(true);
                   }}
                   className="text-xs text-blue-600 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold shadow-sm"
@@ -183,33 +282,59 @@ export default function Teams() {
         )}
       </div>
 
-      {/* SAĞDAN AÇILAN GELİŞMİŞ FORM PANELİ */}
+      {/* SAĞDAN AÇILAN EKİP EKLEME FORMU */}
       <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
         <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2"><span className="text-blue-600 font-bold text-sm">Ekip Formu</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm">Ekip Ekle</span></div>
           <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
         </div>
         
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Ad Soyad</label><input required placeholder="Ad Soyad" className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Telefon Numarası</label><input required placeholder="0" className="w-full border rounded-lg p-2.5" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
+        <form onSubmit={handleCreateSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
+          {isSuperAdmin && (
+            <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-200 mb-2 animate-fadeIn">
+              <label className="block text-xs font-bold text-orange-800 mb-1 uppercase tracking-wider">🏢 Hedef Firma Seçiniz (Super Admin Yetkisi)</label>
+              <select required className="w-full border border-orange-300 rounded-lg p-2.5 bg-white text-xs font-bold focus:ring-2 focus:ring-brand-orange outline-none" value={formData.tenantId} onChange={e => setFormData({...formData, tenantId: e.target.value})}>
+                <option value="">Firma Seçiniz...</option>
+                {globalTenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-xs font-bold text-slate-700 mb-1">Ad Soyad</label><input required placeholder="Ad Soyad" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold text-slate-700 mb-1">Kullanıcı Adı</label><input required placeholder="Örn: utkuobuz" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
+            <div className="col-span-2"><label className="block text-xs font-bold text-slate-700 mb-1">E-Posta Adresi</label><input type="email" required placeholder="E-Posta Adresi" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold text-slate-700 mb-1">Giriş Şifresi</label><input type="password" required placeholder="••••••••" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold text-slate-700 mb-1">Telefon Numarası</label><input required placeholder="0555..." className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
+          </div>
+
+          {/* 🚀 HARİTA ÇÖZÜMÜ: Koordinat Kutuları Eklendi */}
+          <div className="flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner">
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white outline-none focus:ring-2 focus:ring-brand-orange/20 font-mono text-xs" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white outline-none focus:ring-2 focus:ring-brand-orange/20 font-mono text-xs" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
+          </div>
           
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Ekip Lideri (Opsiyonel)</label>
-            <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.teamLeader} onChange={e => setFormData({...formData, teamLeader: e.target.value})}>
+            <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 outline-none focus:ring-2 focus:ring-brand-orange/20" value={formData.teamLeader} onChange={e => setFormData({...formData, teamLeader: e.target.value})}>
               <option value="">Seçiniz (Atanmamış)</option>
               {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Proje</label>
-            <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.project} onChange={e => setFormData({...formData, project: e.target.value})}>
-              {PROJECT_LIST.map((p, idx) => <option key={idx} value={p}>{p}</option>)}
-            </select>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Bağlı Olacağı Projeler</label>
+            <div className="w-full border border-slate-300 rounded-xl p-3 bg-slate-50 max-h-40 overflow-y-auto space-y-2.5 shadow-inner">
+              {projects.map((proj) => (
+                <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-slate-700">
+                  <input type="checkbox" className="w-4 h-4 rounded text-brand-orange border-slate-300" checked={selectedProjectIds.includes(proj.id)} onChange={() => setSelectedProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
+                  <span>{proj.name}</span>
+                </label>
+              ))}
+            </div>
           </div>
 
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Araç Plakası (Opsiyonel)</label><input placeholder="Araç Plakası" className="w-full border rounded-lg p-2.5" value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">Araç Plakası (Opsiyonel)</label><input placeholder="Araç Plakası" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value})} /></div>
 
           <div className="flex justify-end gap-6 items-center pt-6 border-t mt-6">
             <button type="button" onClick={() => setIsFormOpen(false)} className="text-rose-500 font-bold hover:underline">İptal</button>
@@ -218,32 +343,94 @@ export default function Teams() {
         </form>
       </div>
 
-      {/* 🚀 2 SEKMELİ MERKEZ DETAY MODALI */}
+      {/* EDİTLENEBİLİR GELİŞMİŞ MERKEZ MODAL */}
       {isDetailModalOpen && selectedTeam && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fadeIn">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
-              <h2 className="text-base font-bold text-brand-navy">👤 Ekip Personel Detay Kartı</h2>
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-fadeIn">
+            
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+              <h2 className="text-base font-bold text-brand-navy">👤 Ekip Personel Kartı {isEditingModal && '› Düzenleme Modu'}</h2>
               <button onClick={() => setIsDetailModalOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl transition-colors">×</button>
             </div>
 
-            <div className="flex border-b border-slate-200 bg-slate-100/50 px-6 pt-2">
-              <button onClick={() => setActiveTab('details')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'details' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Ekip Bilgileri</button>
-              <button onClick={() => setActiveTab('jobs')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px flex items-center gap-1.5 ${activeTab === 'jobs' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Atanmış İşler <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'jobs' ? 'bg-orange-100 text-brand-orange' : 'bg-slate-200 text-slate-600'}`}>{assignedJobs.length}</span></button>
+            <div className="flex border-b border-slate-200 bg-slate-100/50 px-6 pt-2 shrink-0">
+              <button disabled={isEditingModal} onClick={() => setActiveTab('details')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'details' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Ekip Bilgileri</button>
+              <button disabled={isEditingModal} onClick={() => setActiveTab('jobs')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'jobs' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Atanmış İşler</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar text-xs">
               {activeTab === 'details' && (
-                <div className="space-y-4">
-                  <div className="bg-emerald-50 text-emerald-800 px-4 py-2 rounded-lg font-bold text-sm mb-2">👷 Personel: {selectedTeam.name}</div>
+                <form onSubmit={handleEditSubmit} className="space-y-4">
+                  <div className="bg-emerald-50 text-emerald-800 px-4 py-2 rounded-lg font-bold text-sm mb-4">👷 Personel: {selectedTeam.name}</div>
+                  
                   <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Telefon Numarası</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedTeam.phone} /></div>
-                    <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Ekip Lideri</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedTeam.teamLeader || 'Atanmamış'} /></div>
-                    <div className="col-span-2"><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Bağlı Olduğu Projeler</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedTeam.project} /></div>
-                    <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Araç Plakası</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedTeam.plate || 'Plaka Belirtilmemiş'} /></div>
-                    <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Kayıtlı Konum (Lat, Lng)</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-500 font-mono rounded-lg p-2.5 cursor-not-allowed" value={`${selectedTeam.position[0]}, ${selectedTeam.position[1]}`} /></div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Adı Soyadı</label>
+                      <input required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.name} onChange={e => setEditFormData({...editFormData, name: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Kullanıcı Adı</label>
+                      <input required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.username} onChange={e => setEditFormData({...editFormData, username: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">E-Posta Adresi</label>
+                      <input type="email" required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.email} onChange={e => setEditFormData({...editFormData, email: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Giriş Şifresi</label>
+                      <input type="password" disabled={!isEditingModal} placeholder={isEditingModal ? "Değişmeyecekse boş bırakın" : "••••••••"} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-400'}`} value={editFormData.password} onChange={e => setEditFormData({...editFormData, password: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Telefon Numarası</label>
+                      <input required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.phone} onChange={e => setEditFormData({...editFormData, phone: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Ekip Lideri</label>
+                      {isEditingModal ? (
+                        <select className="w-full border border-blue-400 rounded-lg p-2.5 bg-white text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-100" value={editFormData.teamLeader} onChange={e => setEditFormData({...editFormData, teamLeader: e.target.value})}>
+                          <option value="">Atanmamış</option>
+                          {teams.filter(t => t.id !== selectedTeam.id).map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                        </select>
+                      ) : (
+                        <input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedTeam.teamLeader || 'Atanmamış'} />
+                      )}
+                    </div>
+
+                    {/* 🚀 HARİTA ÇÖZÜMÜ: Düzenleme Ekranı Koordinat Kutuları */}
+                    <div className="col-span-2 flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner mt-1">
+                      <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Kayıtlı Enlem (Lat)</label><input type="number" step="any" required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2 font-semibold outline-none font-mono text-xs ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`} value={editFormData.lat} onChange={e => setEditFormData({...editFormData, lat: parseFloat(e.target.value)})} /></div>
+                      <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Kayıtlı Boylam (Lng)</label><input type="number" step="any" required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2 font-semibold outline-none font-mono text-xs ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`} value={editFormData.lng} onChange={e => setEditFormData({...editFormData, lng: parseFloat(e.target.value)})} /></div>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Araç Plakası</label>
+                      <input disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.plate} onChange={e => setEditFormData({...editFormData, plate: e.target.value})} />
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Bağlı Olduğu Projeler (Çoklu Seçim)</label>
+                      {isEditingModal ? (
+                        <div className="w-full border border-blue-400 rounded-xl p-3 bg-white max-h-36 overflow-y-auto space-y-2 shadow-inner">
+                          {projects.map((proj) => (
+                            <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold">
+                              <input type="checkbox" className="w-4 h-4 rounded text-brand-orange" checked={editProjectIds.includes(proj.id)} onChange={() => setEditProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
+                              <span>{proj.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedTeam.project} />
+                      )}
+                    </div>
                   </div>
-                </div>
+
+                  {isEditingModal && (
+                    <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-slate-100">
+                      <button type="button" onClick={() => setIsEditingModal(false)} className="bg-slate-400 text-white font-bold px-4 py-2 rounded-xl hover:bg-slate-500 transition">Vazgeç</button>
+                      <button type="submit" disabled={isSubmitting} className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 shadow transition">{isSubmitting ? '...' : 'Değişiklikleri Kaydet'}</button>
+                    </div>
+                  )}
+                </form>
               )}
 
               {activeTab === 'jobs' && (
@@ -252,16 +439,12 @@ export default function Teams() {
                     <div className="text-center py-10 text-slate-400 font-medium">📭 Bu ekip üyesine henüz atanmış bir iş emri bulunmuyor.</div>
                   ) : (
                     assignedJobs.map((job) => (
-                      <div key={job.id} className="border border-slate-200 bg-slate-50 rounded-xl p-3 flex justify-between items-center hover:border-brand-orange transition shadow-sm">
+                      <div key={job.id} className="border border-slate-200 bg-slate-50 rounded-xl p-3 flex justify-between items-center shadow-sm">
                         <div className="space-y-1">
                           <h4 className="font-bold text-brand-navy text-sm">{job.customerName}</h4>
                           <p className="text-slate-500 text-[11px] font-medium">Özet: {job.title} | Tip: <span className="font-bold">{job.type}</span></p>
-                          <p className="text-slate-400 text-[10px]">Planlanan Tarih: {job.plannedDate}</p>
                         </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${job.priority === 'Acil' ? 'bg-rose-100 text-rose-600 animate-pulse' : 'bg-orange-100 text-brand-orange'}`}>{job.priority}</span>
-                          <span className="text-[10px] text-slate-400 font-semibold bg-white border border-slate-200 rounded px-1.5 py-0.5">{job.status}</span>
-                        </div>
+                        <span className="text-[10px] text-slate-400 font-semibold bg-white border border-slate-200 rounded px-1.5 py-0.5">{job.status}</span>
                       </div>
                     ))
                   )}
@@ -269,9 +452,15 @@ export default function Teams() {
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end">
-              <button onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between shrink-0">
+              <div>
+                {!isEditingModal && activeTab === 'details' && (
+                  <button onClick={() => setIsEditingModal(true)} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition">✏️ Ekibi Düzenle</button>
+                )}
+              </div>
+              <button disabled={isSubmitting} onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button>
             </div>
+
           </div>
         </div>
       )}

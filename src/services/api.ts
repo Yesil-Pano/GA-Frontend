@@ -1,25 +1,28 @@
-// ga-frontend/src/services/api.ts
-
 import axios from 'axios';
 
-// Backend projenizin çalıştığı adresi buraya yazıyoruz (Genelde localhost:5000 veya benzeri olur)
 const api = axios.create({
-  baseURL: window.location.hostname === 'localhost' ? 'http://localhost:5112' : '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: 'https://204.168.249.86:8443/api'
 });
 
-// Araya Girici (Interceptor): Her HTTP isteği gitmeden önce çalışır
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token'); // Token'ı tarayıcı hafızasından al
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`; // Backend'in beklediği formata ekle
-    }
-    return config;
-  },
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
+api.interceptors.response.use(
+  (response) => response,
   (error) => {
+    if (error.response && error.response.status === 401) {
+      console.warn("Oturum süresi doldu veya yetkisiz erişim!");
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
     return Promise.reject(error);
   }
 );

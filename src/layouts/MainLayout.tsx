@@ -1,6 +1,6 @@
 // ga-frontend/src/layouts/MainLayout.tsx
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import MapView from '../components/MapView';
 import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
@@ -8,9 +8,7 @@ import logoImg from '../assets/logo.png';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
   <div className="flex items-center h-20 border-b border-brand-navy-light px-5 overflow-hidden whitespace-nowrap">
-    {/* 🚀 Eski sarı yuvarlak yerine gelen gıcır gıcır gerçek logonuz */}
     <img src={logoImg} alt="Görev Adamı Logo" className="w-10 h-10 min-w-10 object-contain transition-transform duration-300" />
-
     <div className={`flex flex-col ml-3 transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
       <h1 className="text-xl font-bold tracking-wider text-white leading-tight">GÖREV ADAMI</h1>
       <p className='text-[8px] text-brand-orange uppercase tracking-wider font-semibold'>Yeşil Pano Ayak İzi</p>
@@ -52,7 +50,6 @@ export default function MainLayout() {
     id: string; name: string; statusType: string; city: string; position: [number, number];
   }
 
-  // 🚀 DÜZELTME: any hatasını çözmek için anket API cevabına özel güçlü tip kontratı eklendi
   interface BackendSurveyResponse {
     id: string;
     status: string;
@@ -61,54 +58,66 @@ export default function MainLayout() {
     longitude: number;
   }
 
-  useEffect(() => {
-    const fetchMapData = async () => {
-      try {
-        if (location.pathname.startsWith('/work-orders')) {
-          const response = await api.get('/workorders');
-          const mapped = response.data.map((w: BackendWorkOrderResponse) => ({
-            id: w.id, title: w.customerName || w.title, subtitle: w.description, position: w.position, priority: w.priority, type: 'Saha' as const
-          }));
-          setLiveMarkers(mapped);
-        } 
-        else if (location.pathname.startsWith('/teams')) {
-          const response = await api.get('/teams');
-          const mapped = response.data.map((t: BackendTeamResponse) => ({
-            id: t.id, title: t.name, subtitle: `Plaka: ${t.plate} | Proje: ${t.project}`, position: t.position, priority: 'Orta', type: 'Saha' as const
-          }));
-          setLiveMarkers(mapped);
-        } 
-        else if (location.pathname.startsWith('/map')) {
-          const response = await api.get('/stations');
-          const mapped = response.data.map((s: BackendStationResponse) => ({
-            id: s.id, title: s.name, subtitle: `${s.city} - ${s.statusType}`, position: s.position, priority: 'Orta', type: 'Nokta' as const
-          }));
-          setLiveMarkers(mapped);
-        }
-        else if (location.pathname.startsWith('/surveys')) {
-          const response = await api.get('/surveys');
-          // 💡 DÜZELTME: su: any ifadesi su: BackendSurveyResponse yapılandırmasıyla değiştirildi
-          const mapped = response.data.map((su: BackendSurveyResponse) => ({
-            id: su.id,
-            title: `Anket: ${su.status}`,
-            subtitle: su.description || 'Açıklama girilmemiş.',
-            position: [su.latitude || 39.92, su.longitude || 32.85],
-            priority: 'Orta',
-            type: 'Nokta' as const
-          }));
-          setLiveMarkers(mapped);
-        }
-        else {
-          setLiveMarkers([]);
-        }
-      } catch (error) {
-        console.error("Harita verileri senkronize edilemedi:", error);
+  const fetchMapData = useCallback(async () => {
+    try {
+      if (location.pathname.startsWith('/work-orders')) {
+        const response = await api.get('/workorders');
+        const mapped = response.data.map((w: BackendWorkOrderResponse) => ({
+          id: w.id, title: w.customerName || w.title, subtitle: w.description, position: w.position, priority: w.priority, type: 'Saha' as const
+        }));
+        setLiveMarkers(mapped);
+      } 
+      else if (location.pathname.startsWith('/teams')) {
+        const response = await api.get('/teams');
+        const mapped = response.data.map((t: BackendTeamResponse) => ({
+          id: t.id, title: t.name, subtitle: `Plaka: ${t.plate} | Proje: ${t.project}`, position: t.position, priority: 'Orta', type: 'Saha' as const
+        }));
+        setLiveMarkers(mapped);
+      } 
+      else if (location.pathname.startsWith('/map')) {
+        const response = await api.get('/stations');
+        const mapped = response.data.map((s: BackendStationResponse) => ({
+          id: s.id, title: s.name, subtitle: `${s.city} - ${s.statusType}`, position: s.position, priority: 'Orta', type: 'Nokta' as const
+        }));
+        setLiveMarkers(mapped);
+      }
+      else if (location.pathname.startsWith('/surveys')) {
+        const response = await api.get('/surveys');
+        const mapped = response.data.map((su: BackendSurveyResponse) => ({
+          id: su.id,
+          title: `Anket: ${su.status}`,
+          subtitle: su.description || 'Açıklama girilmemiş.',
+          position: [su.latitude || 39.92, su.longitude || 32.85],
+          priority: 'Orta',
+          type: 'Nokta' as const
+        }));
+        setLiveMarkers(mapped);
+      }
+      else {
         setLiveMarkers([]);
+      }
+    } catch (error) {
+      console.error("Harita verileri senkronize edilemedi:", error);
+      setLiveMarkers([]);
+    }
+  }, [location.pathname]);
+
+  // 🚀 LINTER FIX: Doğrudan çağırmak yerine güvenli bir asenkron zırha aldık
+  useEffect(() => {
+    let isMounted = true;
+
+    const triggerMapFetch = async () => {
+      if (isMounted) {
+        await fetchMapData();
       }
     };
 
-    fetchMapData();
-  }, [location.pathname]);
+    triggerMapFetch();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchMapData]);
 
   const navItems = [
     { path: '/', label: 'Genel Bakış', icon: '📊' },
@@ -119,9 +128,32 @@ export default function MainLayout() {
     { path: '/timesheet', label: 'Zaman Çizelgesi', icon: '📅' },
     { path: '/planning', label: 'Planlama', icon: '🗓️' },
     { path: '/reports', label: 'Raporlama', icon: '📄' },
+    { path: '/settings', label: 'Ayarlar', icon: '⚙️' },
   ];
 
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+
+  if (token) {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(window.atob(base64));
+      
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch (e) {
+      console.error("Super Admin yetki mührü çözülemedi:", e);
+    }
+  }
+
+  const authorizedNavItems = [...navItems];
+  if (isSuperAdmin) {
+    authorizedNavItems.push({ path: '/admin-panel', label: 'Sistem Yönetimi', icon: '🛠️' });
+  }
+
   const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     localStorage.removeItem('isAuthenticated');
     navigate('/login', { replace: true });
   };
@@ -135,7 +167,7 @@ export default function MainLayout() {
   const showSlatPanel = isWorkOrdersPage || isTeamsPage || isMapPage || isSurveysPage;
 
   const filteredMarkers = liveMarkers.filter(m => mapFilter === 'Tümü' || m.priority === mapFilter);
-  const outletContextValue = { setFocusedMarkerPosition, mapFilter, setMapFilter };
+  const outletContextValue = { setFocusedMarkerPosition, mapFilter, setMapFilter, refreshMapData: fetchMapData };
 
   return (
     <div className="flex h-screen w-full bg-slate-50 relative overflow-hidden">
@@ -194,7 +226,7 @@ export default function MainLayout() {
         </div>
         
         <nav className="flex-1 p-3 space-y-2 mt-4 overflow-y-auto overflow-x-hidden custom-scrollbar">
-          {navItems.map((item) => (
+          {authorizedNavItems.map((item) => (
             <NavLink key={item.path} to={item.path} className={({ isActive }) => `flex items-center px-3 py-3 rounded-lg transition-all font-medium ${isActive ? 'bg-brand-orange text-brand-navy shadow-md' : 'text-slate-300 hover:bg-brand-navy-light hover:text-white'}`}>
               <span className="text-xl min-w-8 flex justify-center">{item.icon}</span>
               <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isMenuOpen ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
