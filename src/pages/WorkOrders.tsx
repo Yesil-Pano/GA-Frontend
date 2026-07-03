@@ -16,7 +16,6 @@ interface WorkOrderData {
   address: string;
   startDate: string;
   endDate: string;
-  plannedDate: string;
   position: [number, number];
   operationUserName: string;
   openedByUserName: string;
@@ -32,18 +31,21 @@ interface LookupData {
 }
 
 export default function WorkOrders() {
-  // --- STATELER ---
   const [filter, setFilter] = useState('Tümü');
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [lookups, setLookups] = useState<LookupData>({ personnel: [], types: [], categories: [] });
+  
+  const [lookups, setLookups] = useState<LookupData>({ 
+    personnel: [], 
+    types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'], 
+    categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'] 
+  });
+  
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrderData | null>(null);
-  
-  // 🚀 EKSİK OLAN STATE EKLENDİ (Toplu İşlemler İçin)
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
@@ -56,36 +58,29 @@ export default function WorkOrders() {
 
   const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
 
-  // --- MANTIK SIRALAMASI DÜZELTİLDİ ---
-  // 1. Önce veriler süzülür
   const filteredOrders = orders
     .filter(order => {
       if (filter === 'Tümü') return true;
-      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '';
+      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '' || order.assignedToUserName === 'Atanmamış';
       if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
       if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
       return order.status === filter;
     })
     .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()) || order.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // 2. Sonra seçim metotları bu süzülmüş veriyi (filteredOrders) kullanır
   const handleSelectAll = () => {
     if (selectedOrders.length === filteredOrders.length && filteredOrders.length > 0) {
-      setSelectedOrders([]); // Seçimlerin hepsini kaldır
+      setSelectedOrders([]); 
     } else {
-      setSelectedOrders(filteredOrders.map(o => o.id)); // Sayfadaki her şeyi seç
+      setSelectedOrders(filteredOrders.map(o => o.id)); 
     }
   };
 
   const handleSelectOne = (id: string) => {
-    if (selectedOrders.includes(id)) {
-      setSelectedOrders(prev => prev.filter(orderId => orderId !== id));
-    } else {
-      setSelectedOrders(prev => [...prev, id]);
-    }
+    if (selectedOrders.includes(id)) setSelectedOrders(prev => prev.filter(orderId => orderId !== id));
+    else setSelectedOrders(prev => [...prev, id]);
   };
 
-  // --- VERİ ÇEKME VE GÖNDERME ---
   const fetchOrders = async () => {
     try {
       const response = await api.get('/workorders');
@@ -104,15 +99,25 @@ export default function WorkOrders() {
           api.get('/workorders'),
           api.get('/workorders/lookups')
         ]);
+        
         if (isMounted) {
           setOrders(ordersRes.data);
-          setLookups(lookupsRes.data);
-          if (lookupsRes.data.personnel.length > 0) {
+          
+          const backendData = lookupsRes.data || {};
+          const mappedPersonnel = backendData.teams ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name })) : [];
+
+          setLookups({
+            personnel: mappedPersonnel,
+            types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'],
+            categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi']
+          });
+
+          if (mappedPersonnel.length > 0) {
             setFormData(prev => ({
               ...prev,
-              operationUserId: lookupsRes.data.personnel[0].id,
-              openedByUserId: lookupsRes.data.personnel[0].id,
-              assignedToUserId: lookupsRes.data.personnel[0].id,
+              operationUserId: mappedPersonnel[0].id,
+              openedByUserId: mappedPersonnel[0].id,
+              assignedToUserId: mappedPersonnel[0].id,
             }));
           }
         }
@@ -131,14 +136,25 @@ export default function WorkOrders() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      // 🚀 ZIRH: BÜTÜN EKSİK ALANLAR API'YE EKLENDİ
       await api.post('/workorders', {
-        title: formData.title, customerName: formData.customerName, description: formData.description,
-        mobileDescription: formData.mobileDescription, address: formData.address, priority: formData.priority,
-        workType: formData.workType, workCategory: formData.workCategory,
-        startDate: new Date(formData.startDate).toISOString(), endDate: new Date(formData.endDate).toISOString(),
-        latitude: Number(formData.lat), longitude: Number(formData.lng),
-        operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null, assignedToUserId: formData.assignedToUserId || null,
-        isPeriodic: formData.isPeriodic, recurrenceInterval: formData.recurrenceInterval
+        title: formData.title, 
+        customerName: formData.customerName, 
+        description: formData.description,
+        mobileDescription: formData.mobileDescription, 
+        address: formData.address, 
+        priority: formData.priority,
+        type: formData.workType, 
+        category: formData.workCategory,
+        startDate: new Date(formData.startDate).toISOString(), 
+        endDate: new Date(formData.endDate).toISOString(),
+        latitude: Number(formData.lat), 
+        longitude: Number(formData.lng),
+        operationUserId: formData.operationUserId || null, 
+        openedByUserId: formData.openedByUserId || null, 
+        assignedToUserId: formData.assignedToUserId || null,
+        isPeriodic: formData.isPeriodic, 
+        recurrenceInterval: formData.recurrenceInterval
       });
       setIsFormOpen(false);
       fetchOrders();
@@ -155,24 +171,10 @@ export default function WorkOrders() {
       
       <h1 className="text-2xl font-extrabold text-brand-navy mb-4">İş Emirleri</h1>
 
-      {/* ÜST ARAMA VE FİLTRE PANELİ (Kompakt ve Şık) */}
       <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4">
         <div className="flex flex-1 gap-4 items-center min-w-75">
-          {/* Arama Inputu */}
-          <input 
-            type="text" 
-            placeholder="İş emri veya nokta ara..." 
-            value={searchTerm} 
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20"
-          />
-          
-          {/* Açılır Liste Filtre (Dropdown) */}
-          <select 
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
-          >
+          <input type="text" placeholder="İş emri veya nokta ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer">
             <option value="Tümü">Tüm İşler</option>
             <option value="Bekliyor">Bekliyor</option>
             <option value="Devam Ediyor">Devam Ediyor</option>
@@ -181,70 +183,36 @@ export default function WorkOrders() {
             <option value="Atanmamış">Atanmamış İşler</option>
           </select>
         </div>
-
-        <button onClick={() => setIsFormOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-lg transition-colors shadow-sm whitespace-nowrap">
-          + İş Emri Ekle
-        </button>
+        <button onClick={() => setIsFormOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-lg transition-colors shadow-sm whitespace-nowrap">+ İş Emri Ekle</button>
       </div>
 
-      {/* TOPLU İŞLEM BAR'I (Sadece seçim yapıldığında görünür) */}
       {selectedOrders.length > 0 && (
         <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 flex justify-between items-center shadow-md">
           <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
           <div className="flex gap-3">
-            <button className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
-              ✓ Toplu Onayla
-            </button>
-            <button className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
-              🗑 Toplu Sil
-            </button>
+            <button className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">✓ Toplu Onayla</button>
+            <button className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
           </div>
         </div>
       )}
 
-      {/* TÜMÜNÜ SEÇ CHECKBOX SATIRI */}
       <div className="flex items-center gap-3 mb-3 px-2">
-        <input 
-          type="checkbox" 
-          className="w-5 h-5 cursor-pointer accent-brand-orange"
-          checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0}
-          onChange={handleSelectAll}
-        />
+        <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange" checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0} onChange={handleSelectAll} />
         <span className="text-sm font-bold text-slate-600">Tümünü Seç</span>
       </div>
       
-      {/* İŞ EMRİ LİSTELEME ALANI */}
       <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2 pb-4 custom-scrollbar">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center pt-20 space-y-3">
-            <svg className="animate-spin h-8 w-7 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
+            <svg className="animate-spin h-8 w-7 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
             <span className="text-xs font-bold text-slate-400 tracking-wide animate-pulse">İş Emirleri Yükleniyor...</span>
           </div>
         ) : filteredOrders.length === 0 ? (
           <p className='text-sm text-slate-500 text-center mt-10'>Aranan kriterde iş emri bulunamadı.</p>
         ) : (
           filteredOrders.map((order) => (
-            <div 
-              key={order.id} 
-              onClick={() => order.position && setFocusedMarkerPosition([...order.position])}
-              className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${
-                order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''
-              }`}
-            >
-              {/* KART CHECKBOX */}
-              <input 
-                type="checkbox" 
-                className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0"
-                checked={selectedOrders.includes(order.id)}
-                onChange={(e) => {
-                  e.stopPropagation(); // Karta tıklama (haritaya gitme) eventini engeller
-                  handleSelectOne(order.id);
-                }}
-              />
-
+            <div key={order.id} onClick={() => order.position && setFocusedMarkerPosition([...order.position])} className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''}`}>
+              <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
               <div className="flex-1">
                 <h3 className="text-base font-bold text-brand-navy mb-2">Nokta Adı: {order.customerName || order.title}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs mb-3">
@@ -252,18 +220,8 @@ export default function WorkOrders() {
                   <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Öncelik:</span><span className={`font-bold ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority}</span></div>
                   <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Durum:</span><span className="font-bold text-blue-600">{order.status}</span></div>
                 </div>
-
                 <div className="flex justify-end pt-2 border-t border-slate-100">
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation(); 
-                      setSelectedOrder(order);
-                      setIsDetailModalOpen(true);
-                    }}
-                    className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm"
-                  >
-                    🔎 Detayları Gör
-                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedOrder(order); setIsDetailModalOpen(true); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">🔎 Detayları Gör</button>
                 </div>
               </div>
             </div>
@@ -271,7 +229,6 @@ export default function WorkOrders() {
         )}
       </div>
 
-      {/* SAĞDAN KAYAN FORM PANELİ */}
       <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
         <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2"><span className="text-emerald-600 font-bold">Formu</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm truncate max-w-50">{formData.customerName || 'Yeni İş Emri'}</span></div>
@@ -279,8 +236,8 @@ export default function WorkOrders() {
         </div>
         
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx}>{t}</option>)}</select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx}>{c}</option>)}</select></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx} value={t}>{t}</option>)}</select></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx} value={c}>{c}</option>)}</select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Öncelik Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">Başlık / İş Özeti</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">Müşteri / Pano Adı</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} /></div>
@@ -325,22 +282,13 @@ export default function WorkOrders() {
             <button type="button" onClick={() => setIsFormOpen(false)} className="flex-1 border border-slate-300 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-50 transition">İptal</button>
             <button type="submit" disabled={isSubmitting} className={`flex-1 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-xl shadow-md transition ${isSubmitting ? 'bg-emerald-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
               {isSubmitting ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span>Kaydediliyor...</span>
-                </>
-              ) : (
-                <span>✓ Kaydet</span>
-              )}
+                <><svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Kaydediliyor...</span></>
+              ) : (<span>✓ Kaydet</span>)}
             </button>
           </div>
         </form>
       </div>
 
-      {/* DETAY MODALI */}
       {isDetailModalOpen && selectedOrder && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -355,7 +303,7 @@ export default function WorkOrders() {
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Öncelik Tipi</label><input disabled className={`w-full bg-slate-50 border border-slate-200 font-bold rounded-lg p-2.5 cursor-not-allowed ${selectedOrder.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`} value={selectedOrder.priority} /></div>
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Tipi</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.type} /></div>
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Kategorisi</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.category} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.startDate || selectedOrder.plannedDate || ''} /></div>
+              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.startDate || ''} /></div>
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Bitiş</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.endDate || ''} /></div>
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Enlem - Lat)</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-600 font-mono rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.position?.[0] || ''} /></div>
               <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Boylam - Lng)</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-600 font-mono rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.position?.[1] || ''} /></div>
