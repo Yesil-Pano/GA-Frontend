@@ -13,6 +13,10 @@ interface TeamMemberData {
   plate: string;
   phone: string;
   teamLeader: string;
+  // 🚀 YENİ ALANLAR ARAYÜZE TANITILDI
+  address: string;
+  city: string;
+  district: string;
   position: [number, number];
 }
 
@@ -61,15 +65,15 @@ export default function Teams() {
   const [activeTab, setActiveTab] = useState<'details' | 'jobs'>('details');
   const [isEditingModal, setIsEditingModal] = useState(false); 
 
-  // 🚀 HARİTA: Form State'ine lat/lng eklendi (Ankara Merkez Default)
+  // 🚀 FORM STATE'İNE YENİ ALANLAR EKLENDİ
   const [formData, setFormData] = useState({
-    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', tenantId: '', lat: 39.92077, lng: 32.85411
+    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', address: '', city: '', district: '', tenantId: '', lat: 39.92077, lng: 32.85411
   });
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
 
-  // 🚀 HARİTA: Düzenleme Form State'ine lat/lng eklendi
+  // 🚀 DÜZENLEME STATE'İNE YENİ ALANLAR EKLENDİ
   const [editFormData, setEditFormData] = useState({
-    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', lat: 39.92077, lng: 32.85411
+    name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', address: '', city: '', district: '', lat: 39.92077, lng: 32.85411
   });
   const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
 
@@ -155,7 +159,7 @@ export default function Teams() {
         projectIds: selectedProjectIds
       });
       setIsFormOpen(false);
-      setFormData({ name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', tenantId: '', lat: 39.92077, lng: 32.85411 });
+      setFormData({ name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', address: '', city: '', district: '', tenantId: '', lat: 39.92077, lng: 32.85411 });
       setSelectedProjectIds([]);
       await reloadDataForSubmit();
     } catch (err) {
@@ -246,6 +250,8 @@ export default function Teams() {
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Proje:</span><span className="truncate flex-1 font-bold text-slate-600" title={team.project}>{team.project}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Araç Plakası:</span><span className="flex-1 font-bold text-slate-600">{team.plate || 'Atanmamış'}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Telefon Numarası:</span><span className="flex-1 font-bold text-slate-600">{team.phone}</span></div>
+                {/* 🚀 LİSTEDE İL VE İLÇE GÖSTERİMİ */}
+                <div className="flex"><span className="w-28 text-slate-400 font-bold">Bölge:</span><span className="flex-1 font-bold text-slate-600">{team.city !== '-' ? `${team.city} / ${team.district}` : 'Belirtilmemiş'}</span></div>
               </div>
 
               <div className="flex justify-end mt-3 pt-2 border-t border-slate-100 pl-7">
@@ -262,7 +268,9 @@ export default function Teams() {
                       phone: team.phone,
                       teamLeader: team.teamLeader === '-' ? '' : team.teamLeader,
                       plate: team.plate === '-' ? '' : team.plate,
-                      // 🚀 HARİTA: Tıklanan kişinin koordinatlarını form'a bas
+                      address: team.address === '-' ? '' : team.address,
+                      city: team.city === '-' ? '' : team.city,
+                      district: team.district === '-' ? '' : team.district,
                       lat: team.position[0] || 39.92077,
                       lng: team.position[1] || 32.85411
                     });
@@ -308,12 +316,18 @@ export default function Teams() {
             <div><label className="block text-xs font-bold text-slate-700 mb-1">Telefon Numarası</label><input required placeholder="0555..." className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
           </div>
 
-          {/* 🚀 HARİTA ÇÖZÜMÜ: Koordinat Kutuları Eklendi */}
           <div className="flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner">
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white outline-none focus:ring-2 focus:ring-brand-orange/20 font-mono text-xs" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white outline-none focus:ring-2 focus:ring-brand-orange/20 font-mono text-xs" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
           </div>
           
+          {/* 🚀 FORM: YENİ İL, İLÇE VE ADRES KUTULARI EKLENDİ */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-700 mb-1">İl (Şehir)</label><input placeholder="Örn: Ankara" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold text-slate-700 mb-1">İlçe</label><input placeholder="Örn: Çankaya" className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.district} onChange={e => setFormData({...formData, district: e.target.value})} /></div>
+            <div className="col-span-2"><label className="block text-xs font-bold text-slate-700 mb-1">Açık Adres</label><textarea rows={2} placeholder="Saha personelinin tam adresi..." className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Ekip Lideri (Opsiyonel)</label>
             <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 outline-none focus:ring-2 focus:ring-brand-orange/20" value={formData.teamLeader} onChange={e => setFormData({...formData, teamLeader: e.target.value})}>
@@ -396,7 +410,27 @@ export default function Teams() {
                       )}
                     </div>
 
-                    {/* 🚀 HARİTA ÇÖZÜMÜ: Düzenleme Ekranı Koordinat Kutuları */}
+                    {/* 🚀 MODAL: YENİ İL, İLÇE VE ADRES KUTULARI EKLENDİ */}
+                    <div className="col-span-2 flex gap-4">
+                      <div className="flex-1">
+                        <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">İl (Şehir)</label>
+                        <input disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.city} onChange={e => setEditFormData({...editFormData, city: e.target.value})} />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">İlçe</label>
+                        <input disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.district} onChange={e => setEditFormData({...editFormData, district: e.target.value})} />
+                      </div>
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Açık Adres</label>
+                      {isEditingModal ? (
+                        <textarea rows={2} className="w-full border border-blue-400 rounded-lg p-2.5 bg-white text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-100" value={editFormData.address} onChange={e => setEditFormData({...editFormData, address: e.target.value})} />
+                      ) : (
+                        <textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedTeam.address || '-'} />
+                      )}
+                    </div>
+
                     <div className="col-span-2 flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner mt-1">
                       <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Kayıtlı Enlem (Lat)</label><input type="number" step="any" required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2 font-semibold outline-none font-mono text-xs ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`} value={editFormData.lat} onChange={e => setEditFormData({...editFormData, lat: parseFloat(e.target.value)})} /></div>
                       <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Kayıtlı Boylam (Lng)</label><input type="number" step="any" required={isEditingModal} disabled={!isEditingModal} className={`w-full border rounded-lg p-2 font-semibold outline-none font-mono text-xs ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`} value={editFormData.lng} onChange={e => setEditFormData({...editFormData, lng: parseFloat(e.target.value)})} /></div>

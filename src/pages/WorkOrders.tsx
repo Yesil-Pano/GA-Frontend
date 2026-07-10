@@ -1,5 +1,5 @@
 // src/pages/WorkOrders.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
@@ -20,8 +20,16 @@ interface WorkOrderData {
   operationUserName: string;
   openedByUserName: string;
   assignedToUserName: string;
+  fieldNote?: string | null;
+  fieldNoteAddedAt?: string | null;
   isPeriodic?: boolean;
   recurrenceInterval?: string;
+}
+
+interface OrderPhoto {
+  id: string;
+  fileName: string;
+  url: string;
 }
 
 interface LookupData {
@@ -46,6 +54,9 @@ export default function WorkOrders() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrderData | null>(null);
+  const [orderPhotos, setOrderPhotos] = useState<OrderPhoto[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const photoUrlsRef = useRef<string[]>([]);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
@@ -89,6 +100,53 @@ export default function WorkOrders() {
       console.error("Veriler çekilemedi:", error);
     }
   };
+
+  const revokePhotoUrls = () => {
+    photoUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    photoUrlsRef.current = [];
+  };
+
+  const loadOrderPhotos = async (workOrderId: string) => {
+    setLoadingPhotos(true);
+    revokePhotoUrls();
+    setOrderPhotos([]);
+    try {
+      const { data } = await api.get<Array<{ id: string; fileName: string }>>(`/photos/WorkOrder/${workOrderId}`);
+      const loaded = await Promise.all(
+        data.map(async (photo) => {
+          const res = await api.get(`/photos/${photo.id}/image`, { responseType: 'blob' });
+          const url = URL.createObjectURL(res.data);
+          photoUrlsRef.current.push(url);
+          return {
+            id: photo.id,
+            fileName: photo.fileName,
+            url,
+          };
+        }),
+      );
+      setOrderPhotos(loaded);
+    } catch (error) {
+      console.error('Fotoğraflar yüklenemedi:', error);
+      setOrderPhotos([]);
+    } finally {
+      setLoadingPhotos(false);
+    }
+  };
+
+  const openDetailModal = (order: WorkOrderData) => {
+    setSelectedOrder(order);
+    setIsDetailModalOpen(true);
+    loadOrderPhotos(order.id);
+  };
+
+  const closeDetailModal = () => {
+    revokePhotoUrls();
+    setOrderPhotos([]);
+    setIsDetailModalOpen(false);
+    setSelectedOrder(null);
+  };
+
+  useEffect(() => () => revokePhotoUrls(), []);
 
   useEffect(() => {
     let isMounted = true;
@@ -221,7 +279,7 @@ export default function WorkOrders() {
                   <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Durum:</span><span className="font-bold text-blue-600">{order.status}</span></div>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-slate-100">
-                  <button onClick={(e) => { e.stopPropagation(); setSelectedOrder(order); setIsDetailModalOpen(true); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">🔎 Detayları Gör</button>
+                  <button onClick={(e) => { e.stopPropagation(); openDetailModal(order); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">🔎 Detayları Gör</button>
                 </div>
               </div>
             </div>
@@ -294,7 +352,7 @@ export default function WorkOrders() {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
               <div><h2 className="text-base font-bold text-brand-navy">İş Emri Detay Kartı</h2></div>
-              <button onClick={() => setIsDetailModalOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl p-1 transition-colors">×</button>
+              <button onClick={closeDetailModal} className="text-slate-400 hover:text-rose-600 font-bold text-2xl p-1 transition-colors">×</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-x-6 gap-y-4 custom-scrollbar text-xs">
@@ -316,8 +374,49 @@ export default function WorkOrders() {
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İş Açan Yetkili</label><div className="font-bold text-slate-700 truncate">{selectedOrder.openedByUserName}</div></div>
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Atanan Sahacı</label><div className="font-bold text-blue-600 bg-blue-50/50 border border-blue-100 rounded px-2 py-0.5 inline-block max-w-full truncate">👷 {selectedOrder.assignedToUserName || 'Sahacı Atanmamış'}</div></div>
               </div>
+
+              <div className="col-span-2 mt-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Saha Notu (Tamamlama / İptal)</label>
+                <textarea
+                  disabled
+                  rows={3}
+                  className="w-full bg-amber-50/50 border border-amber-100 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none whitespace-pre-wrap"
+                  value={selectedOrder.fieldNote?.trim() || 'Saha notu girilmemiş.'}
+                />
+                {selectedOrder.fieldNoteAddedAt && (
+                  <p className="text-[10px] text-slate-400 mt-1 font-semibold">Eklenme: {selectedOrder.fieldNoteAddedAt}</p>
+                )}
+              </div>
+
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-2 uppercase tracking-wider">Saha Fotoğrafları</label>
+                {loadingPhotos ? (
+                  <div className="flex items-center gap-2 text-slate-400 text-xs font-bold py-4">
+                    <svg className="animate-spin h-4 w-4 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    Fotoğraflar yükleniyor...
+                  </div>
+                ) : orderPhotos.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-4">Bu iş emrine yüklenmiş fotoğraf yok.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {orderPhotos.map((photo) => (
+                      <a
+                        key={photo.id}
+                        href={photo.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition"
+                        title={photo.fileName}
+                      >
+                        <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                        <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end"><button onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button></div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end"><button onClick={closeDetailModal} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button></div>
           </div>
         </div>
       )}

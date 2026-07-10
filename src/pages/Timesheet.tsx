@@ -72,7 +72,8 @@ export default function Timesheet() {
         ]);
 
         if (isMounted) {
-          const typedOrders = ordersRes.data.map((w: BackendWorkOrderForCalendar) => ({
+          const rawOrders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+          const typedOrders = rawOrders.map((w: BackendWorkOrderForCalendar) => ({
             id: w.id,
             title: w.title,
             customerName: w.customerName,
@@ -85,14 +86,25 @@ export default function Timesheet() {
           }));
 
           setOrders(typedOrders);
-          setLookups(lookupsRes.data);
 
-          if (lookupsRes.data.personnel.length > 0) {
+          const backendData = lookupsRes.data || {};
+          const mappedPersonnel = backendData.teams
+            ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
+            : (backendData.personnel ?? []);
+
+          const normalizedLookups: LookupData = {
+            personnel: mappedPersonnel,
+            types: backendData.types ?? ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'],
+            categories: backendData.categories ?? ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
+          };
+          setLookups(normalizedLookups);
+
+          if (mappedPersonnel.length > 0) {
             setFormData(prev => ({
               ...prev,
-              operationUserId: lookupsRes.data.personnel[0].id,
-              openedByUserId: lookupsRes.data.personnel[0].id,
-              assignedToUserId: lookupsRes.data.personnel[0].id,
+              operationUserId: mappedPersonnel[0].id,
+              openedByUserId: mappedPersonnel[0].id,
+              assignedToUserId: mappedPersonnel[0].id,
             }));
           }
         }
@@ -257,7 +269,8 @@ export default function Timesheet() {
       setIsDrawerOpen(false);
       
       const response = await api.get('/workorders');
-      const refreshedOrders = response.data.map((w: BackendWorkOrderForCalendar) => ({
+      const rawOrders = Array.isArray(response.data) ? response.data : [];
+      const refreshedOrders = rawOrders.map((w: BackendWorkOrderForCalendar) => ({
         id: w.id, title: w.title, customerName: w.customerName, priority: w.priority || 'Orta', status: w.status || 'Bekliyor',
         startDate: w.startDate || w.plannedDate || '', endDate: w.endDate || '', assignedToUserId: w.assignedToUserId, assignedToUserName: w.assignedToUserName
       }));
