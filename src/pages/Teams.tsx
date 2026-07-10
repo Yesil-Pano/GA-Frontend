@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 
 interface TeamMemberData {
   id: string;
@@ -18,6 +19,8 @@ interface TeamMemberData {
   city: string;
   district: string;
   position: [number, number];
+  hasLiveLocation?: boolean;
+  locationUpdatedAt?: string | null;
 }
 
 interface AssignedWorkOrder {
@@ -77,7 +80,13 @@ export default function Teams() {
   });
   const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
 
-  const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
+  const { setFocusedMarkerPosition, refreshMapData } = useOutletContext<{
+    setFocusedMarkerPosition: (pos: [number, number] | null) => void;
+    refreshMapData: () => Promise<void>;
+  }>();
+
+  const [refreshingLocations, setRefreshingLocations] = useState(false);
+  const [lastLocationRefresh, setLastLocationRefresh] = useState<Date | null>(null);
 
   const token = localStorage.getItem('token');
   let isSuperAdmin = false;
@@ -194,6 +203,20 @@ export default function Teams() {
     }
   };
 
+  const handleRefreshLocations = async () => {
+    setRefreshingLocations(true);
+    try {
+      await reloadDataForSubmit();
+      await refreshMapData();
+      setLastLocationRefresh(new Date());
+    } catch (error) {
+      console.error('Canlı konumlar güncellenemedi:', error);
+      alert('Canlı konumlar güncellenemedi. Lütfen tekrar deneyin.');
+    } finally {
+      setRefreshingLocations(false);
+    }
+  };
+
   const filteredTeams = teams.filter(team => 
     team.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     team.plate.toLowerCase().includes(searchTerm.toLowerCase())
@@ -213,10 +236,24 @@ export default function Teams() {
           />
         </div>
         
-        <div className="flex justify-end items-center pb-3 border-b border-slate-100">
-          <button onClick={() => setIsFormOpen(true)} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition">
-            + Ekip Ekle
-          </button>
+        <div className="flex justify-between items-center pb-3 border-b border-slate-100 gap-3">
+          <div className="text-[11px] text-slate-500 font-semibold">
+            {lastLocationRefresh
+              ? `Son güncelleme: ${lastLocationRefresh.toLocaleTimeString('tr-TR')}`
+              : 'Canlı konum için Güncelle\'ye basın'}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRefreshLocations}
+              disabled={refreshingLocations}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition disabled:opacity-60"
+            >
+              {refreshingLocations ? 'Güncelleniyor...' : '📍 Güncelle'}
+            </button>
+            <button onClick={() => setIsFormOpen(true)} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition">
+              + Ekip Ekle
+            </button>
+          </div>
         </div>
       </div>
 
@@ -252,6 +289,14 @@ export default function Teams() {
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Telefon Numarası:</span><span className="flex-1 font-bold text-slate-600">{team.phone}</span></div>
                 {/* 🚀 LİSTEDE İL VE İLÇE GÖSTERİMİ */}
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Bölge:</span><span className="flex-1 font-bold text-slate-600">{team.city !== '-' ? `${team.city} / ${team.district}` : 'Belirtilmemiş'}</span></div>
+                <div className="flex items-center">
+                  <span className="w-28 text-slate-400 font-bold">Canlı Konum:</span>
+                  <span className={`flex-1 font-bold ${team.hasLiveLocation ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {team.hasLiveLocation
+                      ? `Aktif${team.locationUpdatedAt ? ` · ${formatTurkeyDateTime(team.locationUpdatedAt)}` : ''}`
+                      : 'Mobil uygulamadan henüz gelmedi'}
+                  </span>
+                </div>
               </div>
 
               <div className="flex justify-end mt-3 pt-2 border-t border-slate-100 pl-7">

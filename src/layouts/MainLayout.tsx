@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import MapView from '../components/MapView';
 import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
@@ -44,6 +45,7 @@ export default function MainLayout() {
 
   interface BackendTeamResponse {
     id: string; name: string; project: string; plate: string; position: [number, number];
+    hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
   }
 
   interface BackendStationResponse {
@@ -70,7 +72,14 @@ export default function MainLayout() {
       else if (location.pathname.startsWith('/teams')) {
         const response = await api.get('/teams');
         const mapped = response.data.map((t: BackendTeamResponse) => ({
-          id: t.id, title: t.name, subtitle: `Plaka: ${t.plate} | Proje: ${t.project}`, position: t.position, priority: 'Orta', type: 'Saha' as const
+          id: t.id,
+          title: t.name,
+          subtitle: t.hasLiveLocation
+            ? `Canlı konum${t.locationUpdatedAt ? ` · ${formatTurkeyDateTime(t.locationUpdatedAt)}` : ''} | Plaka: ${t.plate}`
+            : `Plaka: ${t.plate} | Proje: ${t.project}`,
+          position: t.position,
+          priority: t.hasLiveLocation ? 'Acil' : 'Orta',
+          type: 'Saha' as const
         }));
         setLiveMarkers(mapped);
       } 
