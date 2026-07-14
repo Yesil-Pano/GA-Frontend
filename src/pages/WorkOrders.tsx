@@ -34,6 +34,17 @@ const toDateTimeLocal = (value?: string | null) => {
   return value.replace(' ', 'T').slice(0, 16);
 };
 
+/** datetime-local için bugünün yerel tarihi (YYYY-MM-DDTHH:mm) */
+const todayDateTimeLocal = (hour: number, minute = 0) => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const hh = String(hour).padStart(2, '0');
+  const mm = String(minute).padStart(2, '0');
+  return `${y}-${m}-${d}T${hh}:${mm}`;
+};
+
 interface OrderPhoto {
   id: string;
   fileName: string;
@@ -118,13 +129,16 @@ export default function WorkOrders() {
   const [formData, setFormData] = useState({
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
     priority: 'Orta', workType: 'Arıza', workCategory: 'Arıza Bildirimi',
-    startDate: '2026-06-19T12:00', endDate: '2026-06-20T12:00', lat: 39.92, lng: 32.85,
+    startDate: todayDateTimeLocal(9), endDate: todayDateTimeLocal(18), lat: 39.92, lng: 32.85,
     operationUserId: '', openedByUserId: '', assignedToUserId: '',
     isPeriodic: false, recurrenceInterval: 'None',
     projectId: '', stationId: '', cityId: '', districtId: '',
   });
 
-  const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
+  const { setFocusedMarkerPosition, refreshMapData } = useOutletContext<{
+    setFocusedMarkerPosition: (pos: [number, number] | null) => void;
+    refreshMapData: () => Promise<void>;
+  }>();
 
   const filteredOrders = orders
     .filter(order => {
@@ -287,6 +301,10 @@ export default function WorkOrders() {
       setAssignUserId(updated.assignedToUserId || '');
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
       setIsEditingDetail(false);
+      await refreshMapData();
+      if (updated.position) {
+        setFocusedMarkerPosition([...updated.position]);
+      }
       alert(data.message || 'İş emri güncellendi.');
     } catch (error) {
       console.error('Güncelleme başarısız:', error);
@@ -472,7 +490,9 @@ export default function WorkOrders() {
         districtId: formData.districtId || null,
       });
       setIsFormOpen(false);
-      fetchOrders();
+      await fetchOrders();
+      await refreshMapData();
+      setFocusedMarkerPosition([Number(formData.lat), Number(formData.lng)]);
     } catch (error) {
       console.error("Kayıt hatası:", error);
       alert("İş emri kaydedilemedi.");
@@ -508,7 +528,14 @@ export default function WorkOrders() {
             <option value="Atanmamış">Atanmamış İşler</option>
           </select>
           <button
-            onClick={() => setIsFormOpen(true)}
+            onClick={() => {
+              setFormData((prev) => ({
+                ...prev,
+                startDate: todayDateTimeLocal(9),
+                endDate: todayDateTimeLocal(18),
+              }));
+              setIsFormOpen(true);
+            }}
             className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors shadow-sm whitespace-nowrap text-sm"
           >
             + İş Emri Ekle
@@ -543,12 +570,21 @@ export default function WorkOrders() {
           filteredOrders.map((order) => (
             <div key={order.id} onClick={() => order.position && setFocusedMarkerPosition([...order.position])} className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''}`}>
               <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
-              <div className="flex-1">
-                <h3 className="text-base font-bold text-brand-navy mb-2">Nokta Adı: {order.customerName || order.title}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs mb-3">
-                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">İş Tipi:</span><span className="text-slate-800 font-bold">{order.type}</span></div>
-                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Öncelik:</span><span className={`font-bold ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority}</span></div>
-                  <div className="flex justify-between md:justify-start gap-2"><span className="text-slate-500 font-medium">Durum:</span><span className="font-bold text-blue-600">{order.status}</span></div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-brand-navy mb-2 truncate">Nokta Adı: {order.customerName || order.title}</h3>
+                <div className="flex flex-col gap-1.5 text-xs mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-medium shrink-0 w-18">İş Tipi</span>
+                    <span className="text-slate-800 font-bold truncate">{order.type || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-medium shrink-0 w-18">Öncelik</span>
+                    <span className={`font-bold truncate ${order.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`}>{order.priority || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-medium shrink-0 w-18">Durum</span>
+                    <span className="font-bold text-blue-600 truncate">{order.status || '-'}</span>
+                  </div>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-slate-100">
                   <button onClick={(e) => { e.stopPropagation(); openDetailModal(order); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">🔎 Detayları Gör</button>

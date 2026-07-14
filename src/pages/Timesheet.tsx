@@ -241,15 +241,17 @@ export default function Timesheet() {
   const kpiTumi = timeBoundedOrders.length;
 
   const handleDayClick = (date: Date) => {
+    // Zaman çizelgesinde tıklanan gün kullanılır; "Bugün" ile bugünün tarihi gelir.
     const localYear = date.getFullYear();
     const localMonth = String(date.getMonth() + 1).padStart(2, '0');
     const localDay = String(date.getDate()).padStart(2, '0');
-    const formattedDate = `${localYear}-${localMonth}-${localDay}T09:00`;
+    const startDate = `${localYear}-${localMonth}-${localDay}T09:00`;
+    const endDate = `${localYear}-${localMonth}-${localDay}T18:00`;
 
     setFormData(prev => ({
       ...prev,
-      startDate: formattedDate,
-      endDate: `${localYear}-${localMonth}-${localDay}T18:00`
+      startDate,
+      endDate,
     }));
     setIsDrawerOpen(true);
   };
