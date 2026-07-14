@@ -7,20 +7,28 @@ interface StationData {
   id: string;
   name: string;
   statusType: string;
-  powerType: string;
-  personnelName: string;
-  personnelPhone: string;
-  edas: string;
-  address: string;
-  pointType: string;
+  powerType?: string;
+  personnelName?: string;
+  personnelPhone?: string;
+  edas?: string;
+  address?: string;
+  pointType?: string;
   city: string;
-  generalFilePath: string;
-  ygTescilBelgesiPath: string;
-  ygSozlesmesiPath: string;
-  sabitFotograflarPath: string;
-  yillikBakimFormuPath: string;
-  ygIsletmeBelgesiPath: string;
+  ownerCompany?: string | null;
+  tenantId?: string;
+  generalFilePath?: string;
+  ygTescilBelgesiPath?: string;
+  ygSozlesmesiPath?: string;
+  sabitFotograflarPath?: string;
+  yillikBakimFormuPath?: string;
+  ygIsletmeBelgesiPath?: string;
   position: [number, number];
+}
+
+interface ProjectLookup {
+  id: string;
+  name: string;
+  tenantId?: string;
 }
 
 const EDAS_LIST = ["VANGÖLÜ", "ULUDAĞ", "TIRAKYA", "TOROSLAR", "SAKARYA", "OSMANGAZİ", "MERAM", "KCTAŞ", "GDZ", "FIRAT", "DİCLE", "ÇORUH", "ÇAMLIBEL", "BOĞAZİÇİ", "BAŞKENT", "AYEDAŞ", "AKEDAŞ", "AKDENİZ", "ADM", "ARAS"];
@@ -29,6 +37,8 @@ const CITIES = ["Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara",
 export default function MapPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [stations, setStations] = useState<StationData[]>([]);
+  const [projects, setProjects] = useState<ProjectLookup[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -43,11 +53,16 @@ export default function MapPage() {
     edas: EDAS_LIST[0], address: '', pointType: 'YG Abonelik', city: 'Ankara', lat: 39.92, lng: 32.85
   });
 
-  const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
+  const { setFocusedMarkerPosition, refreshMapData } = useOutletContext<{
+    setFocusedMarkerPosition: (pos: [number, number] | null) => void;
+    refreshMapData?: () => Promise<void>;
+  }>();
 
-  const fetchStations = async () => {
+  const fetchStations = async (projectId?: string) => {
     try {
-      const response = await api.get('/stations');
+      const response = await api.get('/stations', {
+        params: projectId ? { projectId } : undefined,
+      });
       setStations(response.data);
     } catch (error) {
       console.error("Noktalar çekilemedi:", error);
@@ -56,20 +71,33 @@ export default function MapPage() {
 
   useEffect(() => {
     let isMounted = true;
-    const loadData = async () => {
-      setIsLoading(true); // Veri çekimi başlarken spinner'ı açıyoruz
+    const loadProjects = async () => {
       try {
-        const response = await api.get('/stations');
-        if (isMounted) setStations(response.data);
+        const lookupsRes = await api.get('/teams/lookups');
+        if (isMounted) setProjects(lookupsRes.data || []);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    loadProjects();
+    return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        await fetchStations(selectedProjectId || undefined);
       } catch (error) {
         console.error(error);
       } finally {
-        if (isMounted) setIsLoading(false); // İşlem bittiğinde tekerlek durur
+        if (isMounted) setIsLoading(false);
       }
     };
     loadData();
     return () => { isMounted = false; };
-  }, []);
+  }, [selectedProjectId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +109,8 @@ export default function MapPage() {
       });
       setIsFormOpen(false);
       setFormData({ name: '', statusType: 'Alt Yapı Tamamlandı', powerType: 'AC', personnelName: '', personnelPhone: '', edas: EDAS_LIST[0], address: '', pointType: 'YG Abonelik', city: 'Ankara', lat: 39.92, lng: 32.85 });
-      fetchStations();
+      await fetchStations(selectedProjectId || undefined);
+      await refreshMapData?.();
     } catch (error) {
       console.error(error);
       alert("Nokta eklenemedi.");
@@ -104,8 +133,18 @@ export default function MapPage() {
             className="w-full border border-slate-300 rounded-lg pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-orange outline-none shadow-inner" 
           />
         </div>
-        <div className="flex justify-end pb-2 border-b border-slate-100">
-          <button onClick={() => setIsFormOpen(true)} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition">
+        <div className="flex justify-between items-center pb-2 border-b border-slate-100 gap-3">
+          <select
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 bg-slate-50 outline-none focus:ring-2 focus:ring-brand-orange"
+          >
+            <option value="">Tüm projeler (noktalar)</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <button onClick={() => setIsFormOpen(true)} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition whitespace-nowrap">
             + Nokta Ekle
           </button>
         </div>

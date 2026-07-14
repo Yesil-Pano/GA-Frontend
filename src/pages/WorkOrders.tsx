@@ -17,8 +17,11 @@ interface WorkOrderData {
   startDate: string;
   endDate: string;
   position: [number, number];
+  operationUserId?: string | null;
   operationUserName: string;
+  openedByUserId?: string | null;
   openedByUserName: string;
+  assignedToUserId?: string | null;
   assignedToUserName: string;
   fieldNote?: string | null;
   fieldNoteAddedAt?: string | null;
@@ -26,16 +29,44 @@ interface WorkOrderData {
   recurrenceInterval?: string;
 }
 
+const toDateTimeLocal = (value?: string | null) => {
+  if (!value) return '';
+  return value.replace(' ', 'T').slice(0, 16);
+};
+
 interface OrderPhoto {
   id: string;
   fileName: string;
   url: string;
+  category: 'ISG' | 'OPERASYON' | 'DIGER';
+}
+
+interface StationLookup {
+  id: string;
+  name: string;
+  address?: string;
+  city?: string;
+  district?: string | null;
+  cityId?: string | null;
+  districtId?: string | null;
+  ownerCompany?: string | null;
+  tenantId?: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface ProjectLookup {
+  id: string;
+  name: string;
+  tenantId: string;
 }
 
 interface LookupData {
   personnel: { id: string; fullName: string }[];
   types: string[];
   categories: string[];
+  stations: StationLookup[];
+  projects: ProjectLookup[];
 }
 
 export default function WorkOrders() {
@@ -48,7 +79,9 @@ export default function WorkOrders() {
   const [lookups, setLookups] = useState<LookupData>({ 
     personnel: [], 
     types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'], 
-    categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'] 
+    categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
+    stations: [],
+    projects: [],
   });
   
   const [isLoading, setIsLoading] = useState(true);
@@ -58,13 +91,37 @@ export default function WorkOrders() {
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const photoUrlsRef = useRef<string[]>([]);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [assignUserId, setAssignUserId] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [isEditingDetail, setIsEditingDetail] = useState(false);
+  const [isSavingDetail, setIsSavingDetail] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    title: '',
+    customerName: '',
+    priority: 'Orta',
+    type: 'Arıza',
+    category: 'Arıza Bildirimi',
+    startDate: '',
+    endDate: '',
+    lat: 0,
+    lng: 0,
+    description: '',
+    mobileDescription: '',
+    address: '',
+    operationUserId: '',
+    openedByUserId: '',
+    assignedToUserId: '',
+    isPeriodic: false,
+    recurrenceInterval: 'Haftalik',
+  });
 
   const [formData, setFormData] = useState({
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
     priority: 'Orta', workType: 'Arıza', workCategory: 'Arıza Bildirimi',
     startDate: '2026-06-19T12:00', endDate: '2026-06-20T12:00', lat: 39.92, lng: 32.85,
     operationUserId: '', openedByUserId: '', assignedToUserId: '',
-    isPeriodic: false, recurrenceInterval: 'None'
+    isPeriodic: false, recurrenceInterval: 'None',
+    projectId: '', stationId: '', cityId: '', districtId: '',
   });
 
   const { setFocusedMarkerPosition } = useOutletContext<{ setFocusedMarkerPosition: (pos: [number, number] | null) => void }>();
@@ -111,16 +168,20 @@ export default function WorkOrders() {
     revokePhotoUrls();
     setOrderPhotos([]);
     try {
-      const { data } = await api.get<Array<{ id: string; fileName: string }>>(`/photos/WorkOrder/${workOrderId}`);
+      const { data } = await api.get<Array<{ id: string; fileName: string; description?: string | null }>>(`/photos/WorkOrder/${workOrderId}`);
       const loaded = await Promise.all(
         data.map(async (photo) => {
           const res = await api.get(`/photos/${photo.id}/image`, { responseType: 'blob' });
           const url = URL.createObjectURL(res.data);
           photoUrlsRef.current.push(url);
+          const categoryValue = (photo.description ?? '').trim().toUpperCase();
+          const category: OrderPhoto['category'] =
+            categoryValue === 'ISG' ? 'ISG' : categoryValue === 'OPERASYON' ? 'OPERASYON' : 'DIGER';
           return {
             id: photo.id,
             fileName: photo.fileName,
             url,
+            category,
           };
         }),
       );
@@ -135,6 +196,29 @@ export default function WorkOrders() {
 
   const openDetailModal = (order: WorkOrderData) => {
     setSelectedOrder(order);
+    setAssignUserId(order.assignedToUserId || '');
+    setIsEditingDetail(false);
+    setEditFormData({
+      title: order.title || '',
+      customerName: order.customerName || '',
+      priority: order.priority || 'Orta',
+      type: order.type || 'Arıza',
+      category: order.category || 'Arıza Bildirimi',
+      startDate: toDateTimeLocal(order.startDate),
+      endDate: toDateTimeLocal(order.endDate),
+      lat: order.position?.[0] ?? 0,
+      lng: order.position?.[1] ?? 0,
+      description: order.description || '',
+      mobileDescription: order.mobileDescription || '',
+      address: order.address || '',
+      operationUserId: order.operationUserId || '',
+      openedByUserId: order.openedByUserId || '',
+      assignedToUserId: order.assignedToUserId || '',
+      isPeriodic: !!order.isPeriodic,
+      recurrenceInterval: order.recurrenceInterval && order.recurrenceInterval !== 'None'
+        ? order.recurrenceInterval
+        : 'Haftalik',
+    });
     setIsDetailModalOpen(true);
     loadOrderPhotos(order.id);
   };
@@ -144,6 +228,138 @@ export default function WorkOrders() {
     setOrderPhotos([]);
     setIsDetailModalOpen(false);
     setSelectedOrder(null);
+    setAssignUserId('');
+    setIsEditingDetail(false);
+  };
+
+  const handleSaveDetail = async () => {
+    if (!selectedOrder) return;
+    if (!editFormData.title.trim()) {
+      alert('Başlık zorunludur.');
+      return;
+    }
+    setIsSavingDetail(true);
+    try {
+      const { data } = await api.put(`/workorders/${selectedOrder.id}`, {
+        title: editFormData.title,
+        customerName: editFormData.customerName,
+        description: editFormData.description,
+        mobileDescription: editFormData.mobileDescription,
+        address: editFormData.address,
+        priority: editFormData.priority,
+        type: editFormData.type,
+        category: editFormData.category,
+        startDate: new Date(editFormData.startDate).toISOString(),
+        endDate: new Date(editFormData.endDate).toISOString(),
+        latitude: Number(editFormData.lat),
+        longitude: Number(editFormData.lng),
+        operationUserId: editFormData.operationUserId || null,
+        openedByUserId: editFormData.openedByUserId || null,
+        assignedToUserId: editFormData.assignedToUserId || null,
+        isPeriodic: editFormData.isPeriodic,
+        recurrenceInterval: editFormData.isPeriodic ? editFormData.recurrenceInterval : 'None',
+      });
+
+      const updated: WorkOrderData = {
+        ...selectedOrder,
+        title: data.title,
+        customerName: data.customerName,
+        description: data.description,
+        mobileDescription: data.mobileDescription,
+        address: data.address,
+        priority: data.priority,
+        type: data.type,
+        category: data.category,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        position: data.position,
+        operationUserId: data.operationUserId,
+        operationUserName: data.operationUserName,
+        openedByUserId: data.openedByUserId,
+        openedByUserName: data.openedByUserName,
+        assignedToUserId: data.assignedToUserId,
+        assignedToUserName: data.assignedToUserName,
+        isPeriodic: data.isPeriodic,
+        recurrenceInterval: data.recurrenceInterval,
+      };
+
+      setSelectedOrder(updated);
+      setAssignUserId(updated.assignedToUserId || '');
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+      setIsEditingDetail(false);
+      alert(data.message || 'İş emri güncellendi.');
+    } catch (error) {
+      console.error('Güncelleme başarısız:', error);
+      alert('İş emri kaydedilemedi.');
+    } finally {
+      setIsSavingDetail(false);
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!selectedOrder) return;
+    setIsAssigning(true);
+    try {
+      const { data } = await api.put<{
+        message: string;
+        assignedToUserId: string | null;
+        assignedToUserName: string;
+      }>(`/workorders/${selectedOrder.id}/assign`, {
+        assignedToUserId: assignUserId || null,
+      });
+
+      const updated: WorkOrderData = {
+        ...selectedOrder,
+        assignedToUserId: data.assignedToUserId,
+        assignedToUserName: data.assignedToUserName,
+      };
+      setSelectedOrder(updated);
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+      alert(data.message || 'Atama güncellendi.');
+    } catch (error) {
+      console.error('Atama başarısız:', error);
+      alert('Personel ataması yapılamadı.');
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const filteredStationsForForm = lookups.stations.filter((station) => {
+    if (!formData.projectId) return true;
+    const project = lookups.projects.find((p) => p.id === formData.projectId);
+    if (!project) return true;
+
+    const tokens = project.name
+      .split(/[\s\-/]+/)
+      .map((t) => t.toLowerCase())
+      .filter((t) => t.length >= 3);
+
+    const tenantMatch = station.tenantId === project.tenantId;
+    if (!tokens.length) return tenantMatch;
+
+    const owner = (station.ownerCompany || '').toLowerCase();
+    const name = (station.name || '').toLowerCase();
+    const ownershipMatch = tokens.some((token) => owner.includes(token) || name.includes(token));
+    return ownershipMatch || tenantMatch;
+  });
+
+  const handleStationSelect = (stationId: string) => {
+    const station = lookups.stations.find((s) => s.id === stationId);
+    if (!station) {
+      setFormData((prev) => ({ ...prev, stationId: '', cityId: '', districtId: '' }));
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      stationId,
+      customerName: station.name,
+      address: station.address || prev.address,
+      lat: station.latitude,
+      lng: station.longitude,
+      title: prev.title || `${station.name} iş emri`,
+      cityId: station.cityId || '',
+      districtId: station.districtId || '',
+    }));
   };
 
   useEffect(() => () => revokePhotoUrls(), []);
@@ -162,12 +378,50 @@ export default function WorkOrders() {
           setOrders(ordersRes.data);
           
           const backendData = lookupsRes.data || {};
-          const mappedPersonnel = backendData.teams ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name })) : [];
+          const mappedPersonnel = backendData.teams
+            ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
+            : [];
+          const mappedStations: StationLookup[] = (backendData.stations || []).map(
+            (s: {
+              id: string;
+              name: string;
+              address?: string;
+              city?: string;
+              district?: string | null;
+              cityId?: string | null;
+              districtId?: string | null;
+              ownerCompany?: string | null;
+              tenantId?: string;
+              latitude: number;
+              longitude: number;
+            }) => ({
+              id: s.id,
+              name: s.name,
+              address: s.address,
+              city: s.city,
+              district: s.district,
+              cityId: s.cityId,
+              districtId: s.districtId,
+              ownerCompany: s.ownerCompany,
+              tenantId: s.tenantId,
+              latitude: s.latitude,
+              longitude: s.longitude,
+            }),
+          );
+          const mappedProjects: ProjectLookup[] = (backendData.projects || []).map(
+            (p: { id: string; name: string; tenantId: string }) => ({
+              id: p.id,
+              name: p.name,
+              tenantId: p.tenantId,
+            }),
+          );
 
           setLookups({
             personnel: mappedPersonnel,
             types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'],
-            categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi']
+            categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
+            stations: mappedStations,
+            projects: mappedProjects,
           });
 
           if (mappedPersonnel.length > 0) {
@@ -175,7 +429,7 @@ export default function WorkOrders() {
               ...prev,
               operationUserId: mappedPersonnel[0].id,
               openedByUserId: mappedPersonnel[0].id,
-              assignedToUserId: mappedPersonnel[0].id,
+              assignedToUserId: '',
             }));
           }
         }
@@ -212,7 +466,10 @@ export default function WorkOrders() {
         openedByUserId: formData.openedByUserId || null, 
         assignedToUserId: formData.assignedToUserId || null,
         isPeriodic: formData.isPeriodic, 
-        recurrenceInterval: formData.recurrenceInterval
+        recurrenceInterval: formData.recurrenceInterval,
+        stationId: formData.stationId || null,
+        cityId: formData.cityId || null,
+        districtId: formData.districtId || null,
       });
       setIsFormOpen(false);
       fetchOrders();
@@ -225,14 +482,24 @@ export default function WorkOrders() {
   };
 
   return (
-    <div className="h-full flex flex-col p-6 bg-slate-50 relative overflow-hidden">
+    <div className="h-full flex flex-col p-4 sm:p-6 bg-slate-50 relative overflow-hidden min-w-0">
       
       <h1 className="text-2xl font-extrabold text-brand-navy mb-4">İş Emirleri</h1>
 
-      <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4">
-        <div className="flex flex-1 gap-4 items-center min-w-75">
-          <input type="text" placeholder="İş emri veya nokta ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20" />
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer">
+      <div className="w-full min-w-0 bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4 space-y-3 overflow-hidden">
+        <input
+          type="text"
+          placeholder="İş emri veya nokta ara..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full min-w-0 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20"
+        />
+        <div className="flex gap-2 items-center min-w-0">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="min-w-0 flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
+          >
             <option value="Tümü">Tüm İşler</option>
             <option value="Bekliyor">Bekliyor</option>
             <option value="Devam Ediyor">Devam Ediyor</option>
@@ -240,8 +507,13 @@ export default function WorkOrders() {
             <option value="İptal Edilen">İptal Edilen</option>
             <option value="Atanmamış">Atanmamış İşler</option>
           </select>
+          <button
+            onClick={() => setIsFormOpen(true)}
+            className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors shadow-sm whitespace-nowrap text-sm"
+          >
+            + İş Emri Ekle
+          </button>
         </div>
-        <button onClick={() => setIsFormOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-lg transition-colors shadow-sm whitespace-nowrap">+ İş Emri Ekle</button>
       </div>
 
       {selectedOrders.length > 0 && (
@@ -294,6 +566,42 @@ export default function WorkOrders() {
         </div>
         
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
+          <div className="space-y-3 bg-amber-50/60 p-4 rounded-xl border border-amber-100">
+            <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nokta / Proje Seçimi</h4>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Proje (nokta filtresi)</label>
+              <select
+                className="w-full border border-slate-300 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-brand-orange"
+                value={formData.projectId}
+                onChange={(e) => setFormData({ ...formData, projectId: e.target.value, stationId: '' })}
+              >
+                <option value="">Tüm projeler / noktalar</option>
+                {lookups.projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Saha Noktası *</label>
+              <select
+                required
+                className="w-full border border-slate-300 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-brand-orange"
+                value={formData.stationId}
+                onChange={(e) => handleStationSelect(e.target.value)}
+              >
+                <option value="">Nokta seçiniz...</option>
+                {filteredStationsForForm.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}{s.city ? ` · ${s.city}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1 font-semibold">
+                Nokta seçince müşteri adı, adres ve koordinat otomatik dolar.
+              </p>
+            </div>
+          </div>
+
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx} value={t}>{t}</option>)}</select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx} value={c}>{c}</option>)}</select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Öncelik Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
@@ -308,8 +616,8 @@ export default function WorkOrders() {
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
           </div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Sistem Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Saha Mobil Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Genel Açıklama</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Mühendis Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
           
           <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
@@ -325,6 +633,9 @@ export default function WorkOrders() {
                   <option value="Aylik">Her Ay Otomatik Açılsın</option>
                   <option value="Yillik">Her Yıl Otomatik Açılsın</option>
                 </select>
+                <p className="text-[10px] text-emerald-700/80 mt-1 font-medium">
+                  Periyodik kayıt Planning sayfasında listelenir. Sonraki plan tarihinde sistem otomatik olarak yeni iş emri üretir (arka plan job, ~15 dk).
+                </p>
               </div>
             )}
           </div>
@@ -333,7 +644,13 @@ export default function WorkOrders() {
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label>
+              <select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>
+                <option value="">Atanmamış</option>
+                {lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+              </select>
+            </div>
           </div>
           
           <div className="flex gap-3 pt-4 border-t">
@@ -351,29 +668,234 @@ export default function WorkOrders() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
-              <div><h2 className="text-base font-bold text-brand-navy">İş Emri Detay Kartı</h2></div>
+              <div>
+                <h2 className="text-base font-bold text-brand-navy">
+                  İş Emri Detay Kartı {isEditingDetail ? '› Düzenleme Modu' : ''}
+                </h2>
+              </div>
               <button onClick={closeDetailModal} className="text-slate-400 hover:text-rose-600 font-bold text-2xl p-1 transition-colors">×</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-x-6 gap-y-4 custom-scrollbar text-xs">
-              <div className="col-span-2 bg-blue-50 text-blue-800 px-4 py-2 rounded-lg font-bold text-sm">📌 Nokta Adı: {selectedOrder.customerName}</div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Başlığı / Özeti</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-semibold rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.title} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Öncelik Tipi</label><input disabled className={`w-full bg-slate-50 border border-slate-200 font-bold rounded-lg p-2.5 cursor-not-allowed ${selectedOrder.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`} value={selectedOrder.priority} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Tipi</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.type} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Kategorisi</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.category} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.startDate || ''} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Bitiş</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.endDate || ''} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Enlem - Lat)</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-600 font-mono rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.position?.[0] || ''} /></div>
-              <div><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Boylam - Lng)</label><input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-600 font-mono rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.position?.[1] || ''} /></div>
-              <div className="col-span-2"><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Sistem Açıklaması</label><textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedOrder.description || 'Açıklama girilmemiş.'} /></div>
-              <div className="col-span-2"><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Saha Mobil Açıklaması</label><textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedOrder.mobileDescription || 'Mobil açıklama girilmemiş.'} /></div>
-              <div className="col-span-2"><label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Tam Açık Adres</label><textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedOrder.address || 'Adres girilmemiş.'} /></div>
-              
-              <div className="col-span-2 grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operasyon Sorumlusu</label><div className="font-bold text-slate-700 truncate">{selectedOrder.operationUserName}</div></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İş Açan Yetkili</label><div className="font-bold text-slate-700 truncate">{selectedOrder.openedByUserName}</div></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Atanan Sahacı</label><div className="font-bold text-blue-600 bg-blue-50/50 border border-blue-100 rounded px-2 py-0.5 inline-block max-w-full truncate">👷 {selectedOrder.assignedToUserName || 'Sahacı Atanmamış'}</div></div>
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Nokta Adı</label>
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-bold text-sm outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100 text-blue-800' : 'bg-blue-50 border-blue-100 text-blue-800 cursor-not-allowed'}`}
+                  value={isEditingDetail ? editFormData.customerName : selectedOrder.customerName}
+                  onChange={(e) => setEditFormData({ ...editFormData, customerName: e.target.value })}
+                />
               </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Başlığı / Özeti</label>
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.title : selectedOrder.title}
+                  onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Öncelik Tipi</label>
+                {isEditingDetail ? (
+                  <select
+                    className="w-full border border-blue-400 rounded-lg p-2.5 font-bold bg-white outline-none focus:ring-2 focus:ring-blue-100"
+                    value={editFormData.priority}
+                    onChange={(e) => setEditFormData({ ...editFormData, priority: e.target.value })}
+                  >
+                    <option>Düşük</option>
+                    <option>Orta</option>
+                    <option>Acil</option>
+                  </select>
+                ) : (
+                  <input disabled className={`w-full bg-slate-50 border border-slate-200 font-bold rounded-lg p-2.5 cursor-not-allowed ${selectedOrder.priority === 'Acil' ? 'text-rose-600' : 'text-slate-700'}`} value={selectedOrder.priority} />
+                )}
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Tipi</label>
+                {isEditingDetail ? (
+                  <select
+                    className="w-full border border-blue-400 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-blue-100"
+                    value={editFormData.type}
+                    onChange={(e) => setEditFormData({ ...editFormData, type: e.target.value })}
+                  >
+                    {lookups.types.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.type} />
+                )}
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İş Kategorisi</label>
+                {isEditingDetail ? (
+                  <select
+                    className="w-full border border-blue-400 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-blue-100"
+                    value={editFormData.category}
+                    onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
+                  >
+                    {lookups.categories.map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.category} />
+                )}
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label>
+                <input
+                  type={isEditingDetail ? 'datetime-local' : 'text'}
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.startDate : (selectedOrder.startDate || '')}
+                  onChange={(e) => setEditFormData({ ...editFormData, startDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Bitiş</label>
+                <input
+                  type={isEditingDetail ? 'datetime-local' : 'text'}
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.endDate : (selectedOrder.endDate || '')}
+                  onChange={(e) => setEditFormData({ ...editFormData, endDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Enlem - Lat)</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-mono outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`}
+                  value={isEditingDetail ? editFormData.lat : (selectedOrder.position?.[0] || '')}
+                  onChange={(e) => setEditFormData({ ...editFormData, lat: parseFloat(e.target.value) })}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Boylam - Lng)</label>
+                <input
+                  type="number"
+                  step="any"
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-mono outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-600'}`}
+                  value={isEditingDetail ? editFormData.lng : (selectedOrder.position?.[1] || '')}
+                  onChange={(e) => setEditFormData({ ...editFormData, lng: parseFloat(e.target.value) })}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Genel Açıklama</label>
+                <textarea
+                  disabled={!isEditingDetail}
+                  rows={2}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none resize-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.description : (selectedOrder.description || 'Açıklama girilmemiş.')}
+                  onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Mühendis Açıklaması</label>
+                <textarea
+                  disabled={!isEditingDetail}
+                  rows={2}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none resize-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.mobileDescription : (selectedOrder.mobileDescription || 'Mühendis açıklaması girilmemiş.')}
+                  onChange={(e) => setEditFormData({ ...editFormData, mobileDescription: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Tam Açık Adres</label>
+                <textarea
+                  disabled={!isEditingDetail}
+                  rows={2}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none resize-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail ? editFormData.address : (selectedOrder.address || 'Adres girilmemiş.')}
+                  onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
+                />
+              </div>
+
+              {isEditingDetail ? (
+                <>
+                  <div className="col-span-2 space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                    <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Operasyon Sorumlusu</label>
+                        <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.operationUserId} onChange={(e) => setEditFormData({ ...editFormData, operationUserId: e.target.value })}>
+                          <option value="">-</option>
+                          {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Açan Yetkili</label>
+                        <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.openedByUserId} onChange={(e) => setEditFormData({ ...editFormData, openedByUserId: e.target.value })}>
+                          <option value="">-</option>
+                          {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Atanan Sahacı</label>
+                        <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.assignedToUserId} onChange={(e) => setEditFormData({ ...editFormData, assignedToUserId: e.target.value })}>
+                          <option value="">Atanmamış</option>
+                          {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-span-2 p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
+                    <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                        checked={editFormData.isPeriodic}
+                        onChange={(e) => setEditFormData({ ...editFormData, isPeriodic: e.target.checked })}
+                      />
+                      <span>Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)</span>
+                    </label>
+                    {editFormData.isPeriodic && (
+                      <select
+                        className="w-full border border-emerald-200 rounded-lg p-2 bg-white text-xs font-semibold text-slate-700"
+                        value={editFormData.recurrenceInterval}
+                        onChange={(e) => setEditFormData({ ...editFormData, recurrenceInterval: e.target.value })}
+                      >
+                        <option value="Haftalik">Her Hafta Otomatik Açılsın</option>
+                        <option value="Aylik">Her Ay Otomatik Açılsın</option>
+                        <option value="Yillik">Her Yıl Otomatik Açılsın</option>
+                      </select>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="col-span-2 grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operasyon Sorumlusu</label><div className="font-bold text-slate-700 truncate">{selectedOrder.operationUserName}</div></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İş Açan Yetkili</label><div className="font-bold text-slate-700 truncate">{selectedOrder.openedByUserName}</div></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Mevcut Atama</label><div className="font-bold text-blue-600 bg-blue-50/50 border border-blue-100 rounded px-2 py-0.5 inline-block max-w-full truncate">👷 {selectedOrder.assignedToUserName || 'Sahacı Atanmamış'}</div></div>
+                </div>
+              )}
+
+              {!isEditingDetail && (
+                <div className="col-span-2 bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-3">
+                  <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wider">Sahacı Ata / Değiştir</label>
+                  <div className="flex gap-2 items-center">
+                    <select
+                      className="flex-1 border border-emerald-200 rounded-lg p-2.5 bg-white text-sm font-semibold"
+                      value={assignUserId}
+                      onChange={(e) => setAssignUserId(e.target.value)}
+                    >
+                      <option value="">Atanmamış</option>
+                      {lookups.personnel.map((p) => (
+                        <option key={p.id} value={p.id}>{p.fullName}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAssign}
+                      disabled={isAssigning}
+                      className="px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap"
+                    >
+                      {isAssigning ? 'Kaydediliyor...' : 'Atamayı Kaydet'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="col-span-2 mt-2">
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Saha Notu (Tamamlama / İptal)</label>
@@ -388,35 +910,84 @@ export default function WorkOrders() {
                 )}
               </div>
 
-              <div className="col-span-2">
-                <label className="block font-bold text-slate-500 mb-2 uppercase tracking-wider">Saha Fotoğrafları</label>
-                {loadingPhotos ? (
+              <div className="col-span-2 space-y-4">
+                {(['ISG', 'OPERASYON', 'DIGER'] as const).map((category) => {
+                  const photos = orderPhotos.filter((p) => p.category === category);
+                  if (loadingPhotos) return null;
+                  if (category === 'DIGER' && photos.length === 0) return null;
+                  const title =
+                    category === 'ISG' ? 'İSG Fotoğrafları' :
+                    category === 'OPERASYON' ? 'Operasyon Fotoğrafları' :
+                    'Diğer Fotoğraflar';
+                  return (
+                    <div key={category}>
+                      <label className="block font-bold text-slate-500 mb-2 uppercase tracking-wider">
+                        {title} ({photos.length})
+                      </label>
+                      {photos.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-3">
+                          Bu kategoride fotoğraf yok.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                          {photos.map((photo) => (
+                            <a
+                              key={photo.id}
+                              href={photo.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group block rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition"
+                              title={photo.fileName}
+                            >
+                              <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                              <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {loadingPhotos && (
                   <div className="flex items-center gap-2 text-slate-400 text-xs font-bold py-4">
                     <svg className="animate-spin h-4 w-4 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     Fotoğraflar yükleniyor...
                   </div>
-                ) : orderPhotos.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-4">Bu iş emrine yüklenmiş fotoğraf yok.</p>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {orderPhotos.map((photo) => (
-                      <a
-                        key={photo.id}
-                        href={photo.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group block rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition"
-                        title={photo.fileName}
-                      >
-                        <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
-                        <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
-                      </a>
-                    ))}
-                  </div>
                 )}
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end"><button onClick={closeDetailModal} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button></div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              {isEditingDetail ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDetail(false)}
+                    className="border border-slate-300 text-slate-600 font-bold px-5 py-2 rounded-xl hover:bg-white transition"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveDetail}
+                    disabled={isSavingDetail}
+                    className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 shadow transition disabled:opacity-60"
+                  >
+                    {isSavingDetail ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDetail(true)}
+                    className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition"
+                  >
+                    ✏️ Düzenle
+                  </button>
+                  <button onClick={closeDetailModal} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

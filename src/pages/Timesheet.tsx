@@ -57,7 +57,8 @@ export default function Timesheet() {
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
     priority: 'Orta', workType: 'Arıza', workCategory: 'Arıza Bildirimi',
     startDate: '', endDate: '', lat: 39.92, lng: 32.85,
-    operationUserId: '', openedByUserId: '', assignedToUserId: ''
+    operationUserId: '', openedByUserId: '', assignedToUserId: '',
+    isPeriodic: false, recurrenceInterval: 'Haftalik',
   });
 
   // BİRLEŞİK CANLI MOTOR
@@ -261,12 +262,16 @@ export default function Timesheet() {
       await api.post('/workorders', {
         title: formData.title, customerName: formData.customerName, description: formData.description,
         mobileDescription: formData.mobileDescription, address: formData.address, priority: formData.priority,
-        workType: formData.workType, workCategory: formData.workCategory,
+        type: formData.workType, category: formData.workCategory,
         startDate: new Date(formData.startDate).toISOString(), endDate: new Date(formData.endDate).toISOString(),
         latitude: Number(formData.lat), longitude: Number(formData.lng),
-        operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null, assignedToUserId: formData.assignedToUserId || null
+        operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null,
+        assignedToUserId: formData.assignedToUserId || null,
+        isPeriodic: formData.isPeriodic,
+        recurrenceInterval: formData.isPeriodic ? formData.recurrenceInterval : 'None',
       });
       setIsDrawerOpen(false);
+      setFormData((prev) => ({ ...prev, isPeriodic: false, recurrenceInterval: 'Haftalik' }));
       
       const response = await api.get('/workorders');
       const rawOrders = Array.isArray(response.data) ? response.data : [];
@@ -455,9 +460,38 @@ export default function Timesheet() {
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
           </div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Sistem Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Saha Mobil Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Genel Açıklama</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-600 mb-1">Mühendis Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+
+          <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
+            <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                checked={formData.isPeriodic}
+                onChange={e => setFormData({ ...formData, isPeriodic: e.target.checked })}
+              />
+              <span>Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)</span>
+            </label>
+            {formData.isPeriodic && (
+              <div>
+                <label className="block text-[11px] font-bold text-emerald-700 mb-1">Tekrarlanma Döngüsü Sıklığı</label>
+                <select
+                  className="w-full border border-emerald-200 rounded-lg p-2 bg-white text-xs font-semibold text-slate-700"
+                  value={formData.recurrenceInterval}
+                  onChange={e => setFormData({ ...formData, recurrenceInterval: e.target.value })}
+                >
+                  <option value="Haftalik">Her Hafta Otomatik Açılsın</option>
+                  <option value="Aylik">Her Ay Otomatik Açılsın</option>
+                  <option value="Yillik">Her Yıl Otomatik Açılsın</option>
+                </select>
+                <p className="text-[10px] text-emerald-700/80 mt-1 font-medium">
+                  Periyodik kayıt Planning sayfasında listelenir. Sonraki plan tarihinde sistem otomatik olarak yeni iş emri üretir.
+                </p>
+              </div>
+            )}
+          </div>
           
           <div className="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>

@@ -87,6 +87,7 @@ export default function Teams() {
 
   const [refreshingLocations, setRefreshingLocations] = useState(false);
   const [lastLocationRefresh, setLastLocationRefresh] = useState<Date | null>(null);
+  const [isDeletingTeam, setIsDeletingTeam] = useState(false);
 
   const token = localStorage.getItem('token');
   let isSuperAdmin = false;
@@ -214,6 +215,37 @@ export default function Teams() {
       alert('Canlı konumlar güncellenemedi. Lütfen tekrar deneyin.');
     } finally {
       setRefreshingLocations(false);
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    if (!selectedTeam) return;
+    const confirmed = window.confirm(
+      `"${selectedTeam.name}" ekibini silmek istediğinize emin misiniz?\n\nAçık iş emirleri (Bekliyor / Devam Ediyor) Atanmamış'a çekilecek. Tamamlanan işler silinmez.`,
+    );
+    if (!confirmed) return;
+
+    setIsDeletingTeam(true);
+    try {
+      const { data } = await api.delete<{ Message?: string; message?: string; unassignedWorkOrderCount?: number }>(
+        `/teams/${selectedTeam.id}`,
+      );
+      alert(
+        `${data.Message || data.message || 'Ekip silindi.'}${
+          typeof data.unassignedWorkOrderCount === 'number'
+            ? `\nAtanmamışa çekilen açık iş: ${data.unassignedWorkOrderCount}`
+            : ''
+        }`,
+      );
+      setIsDetailModalOpen(false);
+      setSelectedTeam(null);
+      await reloadDataForSubmit();
+      await refreshMapData();
+    } catch (error) {
+      console.error('Ekip silinemedi:', error);
+      alert('Ekip silinemedi. Yetkinizi veya bağlantınızı kontrol edin.');
+    } finally {
+      setIsDeletingTeam(false);
     }
   };
 
@@ -531,13 +563,23 @@ export default function Teams() {
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between shrink-0">
-              <div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between shrink-0 gap-3">
+              <div className="flex gap-2">
                 {!isEditingModal && activeTab === 'details' && (
-                  <button onClick={() => setIsEditingModal(true)} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition">✏️ Ekibi Düzenle</button>
+                  <>
+                    <button onClick={() => setIsEditingModal(true)} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition">✏️ Ekibi Düzenle</button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteTeam}
+                      disabled={isDeletingTeam}
+                      className="bg-rose-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-rose-700 shadow transition disabled:opacity-60"
+                    >
+                      {isDeletingTeam ? 'Siliniyor...' : '🗑️ Ekibi Sil'}
+                    </button>
+                  </>
                 )}
               </div>
-              <button disabled={isSubmitting} onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button>
+              <button disabled={isSubmitting || isDeletingTeam} onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-slate-800 transition shadow">Kapat</button>
             </div>
 
           </div>
