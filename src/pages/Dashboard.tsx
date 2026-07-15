@@ -1,5 +1,6 @@
 // ga-frontend/src/pages/Dashboard.tsx
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
 interface DashboardStats {
@@ -19,6 +20,7 @@ interface DashboardWorkOrder {
 }
 
 export default function Dashboard() {
+  const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
   const [stats, setStats] = useState<DashboardStats>({
     totalCount: 0, acilCount: 0, ortaCount: 0, dusukCount: 0,
     bekliyorCount: 0, devamEdiyorCount: 0, tamamlandiCount: 0, iptalEdildiCount: 0, activeUsers: 0
@@ -27,6 +29,7 @@ export default function Dashboard() {
 
   useEffect(() => {
   const loadDashboardData = async () => {
+    setIsLoading(true);
     try {
       const [ordersRes, teamsRes] = await Promise.all([
         api.get('/workorders'),
@@ -55,7 +58,7 @@ export default function Dashboard() {
     }
   };
   loadDashboardData();
-}, []);
+}, [partnerKey]);
 
   if (isLoading) {
     return (

@@ -266,7 +266,7 @@ export default function Surveys() {
 
           {SURVEY_QUESTIONS.map((q) => (
             <div key={q.id} className="space-y-2 border-b border-slate-100 pb-3">
-              <label className="block font-bold text-slate-700 leading-relaxed flex items-center gap-1.5">
+              <label className="font-bold text-slate-700 leading-relaxed flex items-center gap-1.5">
                 <span>{q.text}</span>
                 <span className="text-slate-400 cursor-help font-normal text-[10px]" title="Bilgi">ℹ️</span>
               </label>
@@ -296,7 +296,7 @@ export default function Surveys() {
           ))}
 
           <div>
-            <label className="block font-bold text-slate-700 flex items-center gap-1 mb-1.5">
+            <label className="font-bold text-slate-700 flex items-center gap-1 mb-1.5">
               <span>29. Açıklama (Opsiyonel)</span>
               <span className="text-slate-400 cursor-help font-normal text-[10px]" title="Bilgi">ℹ️</span>
             </label>

@@ -6,16 +6,34 @@ import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
+import {
+  PARTNERS,
+  getPartnerByKey,
+  getStoredPartnerKey,
+  storePartnerKey,
+  type PartnerKey,
+  type PartnerOption,
+} from '../utils/partners';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
   <div className="flex items-center h-20 border-b border-brand-navy-light px-5 overflow-hidden whitespace-nowrap">
     <img src={logoImg} alt="Görev Adamı Logo" className="w-10 h-10 min-w-10 object-contain transition-transform duration-300" />
     <div className={`flex flex-col ml-3 transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
       <h1 className="text-xl font-bold tracking-wider text-white leading-tight">GÖREV ADAMI</h1>
-      <p className='text-[8px] text-brand-orange uppercase tracking-wider font-semibold'>Yeşil Pano Ayak İzi</p>
+      <p className="text-[8px] text-brand-orange uppercase tracking-wider font-semibold">Yeşil Pano Ayak İzi</p>
     </div>
   </div>
 );
+
+interface AppNotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  workOrderId?: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
 
 export default function MainLayout() {
   const navigate = useNavigate();
@@ -27,51 +45,62 @@ export default function MainLayout() {
   const [liveMarkers, setLiveMarkers] = useState<MapMarker[]>([]);
 
   const [isPartnerDropdownOpen, setIsPartnerDropdownOpen] = useState(false);
-  const [activePartner, setActivePartner] = useState({
-    name: 'Trugo Şarj İstasyonları', letter: 'T'
-  });
+  const [activePartner, setActivePartner] = useState<PartnerOption>(() =>
+    getPartnerByKey(getStoredPartnerKey()),
+  );
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const notifications = [
-    { id: 1, text: "🔔 Trugo sisteminden yeni bir otomatik periyodik iş açıldı!", time: "Şimdi" },
-    { id: 2, text: "👷 Utku Obuz ekibi Yeşil Pano Projesi konumuna ulaştı.", time: "10 dk önce" },
-    { id: 3, text: "📍 Ankara merkez istasyon altyapı statüsü güncellendi.", time: "1 saat önce" }
-  ];
+  const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  interface BackendWorkOrderResponse {
-    id: string; title: string; customerName: string; priority: string; status: string;
-    type: string; description: string; plannedDate: string; position: [number, number];
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+  if (token) {
+    try {
+      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch (e) {
+      console.error('Super Admin yetki mührü çözülemedi:', e);
+    }
   }
 
-  interface BackendTeamResponse {
-    id: string; name: string; project: string; plate: string; position: [number, number];
-    hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
-  }
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const { data } = await api.get<{ unread: number; items: AppNotificationItem[] }>('/notifications');
+      setNotifications(data.items || []);
+      setUnreadCount(data.unread || 0);
+    } catch (error) {
+      console.error('Bildirimler alınamadı:', error);
+    }
+  }, []);
 
-  interface BackendStationResponse {
-    id: string; name: string; statusType: string; city: string; position: [number, number];
-  }
-
-  interface BackendSurveyResponse {
-    id: string;
-    status: string;
-    description: string;
-    latitude: number;
-    longitude: number;
-  }
+  useEffect(() => {
+    fetchNotifications();
+    const id = window.setInterval(fetchNotifications, 60_000);
+    return () => window.clearInterval(id);
+  }, [fetchNotifications]);
 
   const fetchMapData = useCallback(async () => {
     try {
       if (location.pathname.startsWith('/work-orders')) {
         const response = await api.get('/workorders');
-        const mapped = response.data.map((w: BackendWorkOrderResponse) => ({
-          id: w.id, title: w.customerName || w.title, subtitle: w.description, position: w.position, priority: w.priority, type: 'Saha' as const
+        const mapped = response.data.map((w: {
+          id: string; title: string; customerName: string; priority: string; description: string; position: [number, number];
+        }) => ({
+          id: w.id,
+          title: w.customerName || w.title,
+          subtitle: w.description,
+          position: w.position,
+          priority: w.priority,
+          type: 'Saha' as const,
         }));
         setLiveMarkers(mapped);
-      } 
-      else if (location.pathname.startsWith('/teams')) {
+      } else if (location.pathname.startsWith('/teams')) {
         const response = await api.get('/teams');
-        const mapped = response.data.map((t: BackendTeamResponse) => ({
+        const mapped = response.data.map((t: {
+          id: string; name: string; project: string; plate: string; position: [number, number];
+          hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
+        }) => ({
           id: t.id,
           title: t.name,
           subtitle: t.hasLiveLocation
@@ -79,81 +108,88 @@ export default function MainLayout() {
             : `Plaka: ${t.plate} | Proje: ${t.project}`,
           position: t.position,
           priority: t.hasLiveLocation ? 'Acil' : 'Orta',
-          type: 'Saha' as const
+          type: 'Saha' as const,
         }));
         setLiveMarkers(mapped);
-      } 
-      else if (location.pathname.startsWith('/map')) {
+      } else if (location.pathname.startsWith('/map')) {
         const response = await api.get('/stations');
-        const mapped = response.data.map((s: BackendStationResponse) => ({
-          id: s.id, title: s.name, subtitle: `${s.city} - ${s.statusType}`, position: s.position, priority: 'Orta', type: 'Nokta' as const
+        const mapped = response.data.map((s: {
+          id: string; name: string; statusType: string; city: string; position: [number, number];
+        }) => ({
+          id: s.id,
+          title: s.name,
+          subtitle: `${s.city} - ${s.statusType}`,
+          position: s.position,
+          priority: 'Orta',
+          type: 'Nokta' as const,
         }));
         setLiveMarkers(mapped);
-      }
-      else if (location.pathname.startsWith('/surveys')) {
+      } else if (location.pathname.startsWith('/surveys')) {
         const response = await api.get('/surveys');
-        const mapped = response.data.map((su: BackendSurveyResponse) => ({
+        const mapped = response.data.map((su: {
+          id: string; status: string; description: string; latitude: number; longitude: number;
+        }) => ({
           id: su.id,
           title: `Anket: ${su.status}`,
           subtitle: su.description || 'Açıklama girilmemiş.',
-          position: [su.latitude || 39.92, su.longitude || 32.85],
+          position: [su.latitude || 39.92, su.longitude || 32.85] as [number, number],
           priority: 'Orta',
-          type: 'Nokta' as const
+          type: 'Nokta' as const,
         }));
         setLiveMarkers(mapped);
-      }
-      else {
+      } else {
         setLiveMarkers([]);
       }
     } catch (error) {
-      console.error("Harita verileri senkronize edilemedi:", error);
+      console.error('Harita verileri senkronize edilemedi:', error);
       setLiveMarkers([]);
     }
-  }, [location.pathname]);
+  }, [location.pathname, activePartner.key]);
 
-  // 🚀 LINTER FIX: Doğrudan çağırmak yerine güvenli bir asenkron zırha aldık
   useEffect(() => {
     let isMounted = true;
-
-    const triggerMapFetch = async () => {
-      if (isMounted) {
-        await fetchMapData();
-      }
+    const run = async () => {
+      if (isMounted) await fetchMapData();
     };
-
-    triggerMapFetch();
-
+    run();
     return () => {
       isMounted = false;
     };
   }, [fetchMapData]);
 
+  const handlePartnerSelect = (partner: PartnerOption) => {
+    setActivePartner(partner);
+    storePartnerKey(partner.key);
+    setIsPartnerDropdownOpen(false);
+  };
+
+  const handleNotificationClick = async (n: AppNotificationItem) => {
+    try {
+      if (!n.isRead) {
+        await api.put(`/notifications/${n.id}/read`);
+        setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
+        setUnreadCount((c) => Math.max(0, c - 1));
+      }
+    } catch {
+      /* ignore */
+    }
+    setIsNotificationOpen(false);
+    if (n.workOrderId) {
+      navigate(`/work-orders?open=${n.workOrderId}`);
+    }
+  };
+
   const navItems = [
     { path: '/', label: 'Genel Bakış', icon: '📊' },
     { path: '/work-orders', label: 'İş Emri', icon: '💼' },
     { path: '/teams', label: 'Ekipler', icon: '👥' },
-    { path: '/map', label: 'Noktalar', icon: '📍' }, 
+    { path: '/map', label: 'Noktalar', icon: '📍' },
     { path: '/surveys', label: 'Anketler', icon: '📝' },
     { path: '/timesheet', label: 'Zaman Çizelgesi', icon: '📅' },
     { path: '/planning', label: 'Planlama', icon: '🗓️' },
     { path: '/reports', label: 'Raporlama', icon: '📄' },
     { path: '/settings', label: 'Ayarlar', icon: '⚙️' },
   ];
-
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-
-  if (token) {
-    try {
-      const base64Url = token.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const payload = JSON.parse(window.atob(base64));
-      
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-    } catch (e) {
-      console.error("Super Admin yetki mührü çözülemedi:", e);
-    }
-  }
 
   const authorizedNavItems = [...navItems];
   if (isSuperAdmin) {
@@ -168,21 +204,28 @@ export default function MainLayout() {
   };
 
   const isWorkOrdersPage = location.pathname.startsWith('/work-orders');
-  const isTeamsPage = location.pathname.startsWith('/teams'); 
+  const isTeamsPage = location.pathname.startsWith('/teams');
   const isMapPage = location.pathname.startsWith('/map');
   const isSurveysPage = location.pathname.startsWith('/surveys');
-  
+
   const showMapBackground = isWorkOrdersPage || isTeamsPage || isMapPage || isSurveysPage;
   const showSlatPanel = isWorkOrdersPage || isTeamsPage || isMapPage || isSurveysPage;
 
-  const filteredMarkers = liveMarkers.filter(m => mapFilter === 'Tümü' || m.priority === mapFilter);
-  const outletContextValue = { setFocusedMarkerPosition, mapFilter, setMapFilter, refreshMapData: fetchMapData };
+  const filteredMarkers = liveMarkers.filter((m) => mapFilter === 'Tümü' || m.priority === mapFilter);
+  const outletContextValue = {
+    setFocusedMarkerPosition,
+    mapFilter,
+    setMapFilter,
+    refreshMapData: fetchMapData,
+    activePartner,
+    partnerKey: activePartner.key as PartnerKey,
+  };
 
   return (
     <div className="flex h-screen w-full bg-slate-50 relative overflow-hidden">
-      <div className="w-20 h-full shrink-0 z-10 bg-brand-navy"></div>
+      <div className="w-20 h-full shrink-0 z-10 bg-brand-navy" />
 
-      <aside 
+      <aside
         onMouseEnter={() => setIsMenuOpen(true)}
         onMouseLeave={() => {
           setIsMenuOpen(false);
@@ -191,90 +234,133 @@ export default function MainLayout() {
         className={`absolute top-0 left-0 h-full bg-brand-navy text-white flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out overflow-hidden ${isMenuOpen ? 'w-64' : 'w-20'}`}
       >
         <Logo isExpanded={isMenuOpen} />
-        
-        <div className="mt-4 px-3 shrink-0 relative">
-          <button 
-            onClick={() => isMenuOpen && setIsPartnerDropdownOpen(!isPartnerDropdownOpen)}
-            className={`w-full flex items-center bg-[#1A233A] text-white rounded-lg py-2.5 border border-slate-600 hover:bg-slate-700 transition-all duration-300 shadow-inner ${isMenuOpen ? 'px-3 justify-between' : 'justify-center'}`}
-          >
-            <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
-              <div className="w-5 h-5 min-w-5 bg-brand-orange rounded-full flex items-center justify-center text-brand-navy font-bold text-[10px] shrink-0">
-                {activePartner.letter}
-              </div>
-              <span className={`text-sm font-medium transition-all duration-300 tracking-wide truncate ${isMenuOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 pointer-events-none'}`}>
-                {activePartner.name}
-              </span>
-            </div>
-            <span className={`text-xs text-slate-400 transition-opacity duration-200 ${isMenuOpen ? 'opacity-100' : 'opacity-0 w-0 h-0 overflow-hidden pointer-events-none'}`}>
-              {isPartnerDropdownOpen ? '▲' : '▼'}
-            </span>
-          </button>
 
-          {isPartnerDropdownOpen && isMenuOpen && (
-            <div className="absolute left-3 right-3 mt-1 bg-[#1A233A] border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 text-xs">
-              {[
-                { name: 'Trugo Şarj İstasyonları', letter: 'T' },
-                { name: 'Unilever Algida', letter: 'A' },
-                { name: 'Astor Enerji', letter: 'E' },
-                { name: 'Yeşil Pano Projesi', letter: 'Y' }
-              ].map((partner, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setActivePartner(partner);
-                    setIsPartnerDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2.5 hover:bg-brand-orange hover:text-brand-navy transition-colors flex items-center gap-2 ${activePartner.name === partner.name ? 'text-brand-orange font-bold' : 'text-slate-300'}`}
-                >
-                  <span className="w-4 h-4 rounded-full bg-slate-800 text-white flex items-center justify-center text-[9px] font-bold">{partner.letter}</span>
-                  <span className="truncate">{partner.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        
+        {isSuperAdmin && (
+          <div className="mt-4 px-3 shrink-0 relative">
+            <button
+              onClick={() => isMenuOpen && setIsPartnerDropdownOpen(!isPartnerDropdownOpen)}
+              className={`w-full flex items-center bg-[#1A233A] text-white rounded-lg py-2.5 border border-slate-600 hover:bg-slate-700 transition-all duration-300 shadow-inner ${isMenuOpen ? 'px-3 justify-between' : 'justify-center'}`}
+            >
+              <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
+                <div className="w-5 h-5 min-w-5 bg-brand-orange rounded-full flex items-center justify-center text-brand-navy font-bold text-[10px] shrink-0">
+                  {activePartner.letter}
+                </div>
+                <span className={`text-sm font-medium transition-all duration-300 tracking-wide truncate ${isMenuOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 pointer-events-none'}`}>
+                  {activePartner.name}
+                </span>
+              </div>
+              <span className={`text-xs text-slate-400 transition-opacity duration-200 ${isMenuOpen ? 'opacity-100' : 'opacity-0 w-0 h-0 overflow-hidden pointer-events-none'}`}>
+                {isPartnerDropdownOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {isPartnerDropdownOpen && isMenuOpen && (
+              <div className="absolute left-3 right-3 mt-1 bg-[#1A233A] border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 text-xs">
+                {PARTNERS.map((partner) => (
+                  <button
+                    key={partner.key}
+                    onClick={() => handlePartnerSelect(partner)}
+                    className={`w-full text-left px-3 py-2.5 hover:bg-brand-orange hover:text-brand-navy transition-colors flex items-center gap-2 ${activePartner.key === partner.key ? 'text-brand-orange font-bold' : 'text-slate-300'}`}
+                  >
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-white flex items-center justify-center text-[9px] font-bold">
+                      {partner.letter}
+                    </span>
+                    <span className="truncate">{partner.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <nav className="flex-1 p-3 space-y-2 mt-4 overflow-y-auto overflow-x-hidden custom-scrollbar">
           {authorizedNavItems.map((item) => (
-            <NavLink key={item.path} to={item.path} className={({ isActive }) => `flex items-center px-3 py-3 rounded-lg transition-all font-medium ${isActive ? 'bg-brand-orange text-brand-navy shadow-md' : 'text-slate-300 hover:bg-brand-navy-light hover:text-white'}`}>
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) =>
+                `flex items-center px-3 py-3 rounded-lg transition-all font-medium ${isActive ? 'bg-brand-orange text-brand-navy shadow-md' : 'text-slate-300 hover:bg-brand-navy-light hover:text-white'}`
+              }
+            >
               <span className="text-xl min-w-8 flex justify-center">{item.icon}</span>
-              <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isMenuOpen ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
+              <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isMenuOpen ? 'opacity-100' : 'opacity-0'}`}>
+                {item.label}
+              </span>
             </NavLink>
           ))}
         </nav>
       </aside>
 
       <main className="flex-1 flex flex-col relative z-10 h-screen overflow-hidden">
-        <header className="h-20 shrink-0 bg-white/90 backdrop-blur-sm border-b border-slate-200 flex items-center px-8 shadow-sm justify-end z-10 gap-4">
+        <header className="h-20 shrink-0 bg-white/90 backdrop-blur-sm border-b border-slate-200 flex items-center px-8 shadow-sm justify-end z-40 gap-4 relative">
           <div className="relative">
-            <button onClick={() => setIsNotificationOpen(!isNotificationOpen)} className="p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl relative transition shadow-sm text-lg">
-              🔔 <span className="absolute -top-1 -right-1 bg-brand-orange text-brand-navy text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-white animate-bounce">{notifications.length}</span>
+            <button
+              onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+              className="p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl relative transition shadow-sm text-lg"
+            >
+              🔔
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-brand-orange text-brand-navy text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-white">
+                  {unreadCount}
+                </span>
+              )}
             </button>
             {isNotificationOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-50 text-xs animate-fadeIn">
-                <div className="p-3 bg-slate-50 font-bold border-b border-slate-200 text-brand-navy flex justify-between"><span>Anlık İş Takip Akışı</span><span className="text-brand-orange">● Canlı</span></div>
-                <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-                  {notifications.map(n => (
-                    <div key={n.id} className="p-3 hover:bg-slate-50 transition-colors">
-                      <p className="text-slate-700 font-medium leading-relaxed">{n.text}</p>
-                      <span className="text-[10px] text-slate-400 mt-1 block text-right font-semibold">{n.time}</span>
-                    </div>
-                  ))}
+              <div className="absolute right-0 mt-2 w-96 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-[100] text-xs animate-fadeIn">
+                <div className="p-3 bg-slate-50 font-bold border-b border-slate-200 text-brand-navy flex justify-between items-center">
+                  <span>Bildirimler</span>
+                  <button
+                    type="button"
+                    className="text-[10px] text-brand-orange font-bold"
+                    onClick={async () => {
+                      await api.put('/notifications/read-all');
+                      fetchNotifications();
+                    }}
+                  >
+                    Tümünü okundu işaretle
+                  </button>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <p className="p-4 text-slate-400 text-center">Bildirim yok.</p>
+                  ) : (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => handleNotificationClick(n)}
+                        className={`w-full text-left p-3 hover:bg-slate-50 transition-colors ${n.isRead ? 'opacity-70' : 'bg-orange-50/40'}`}
+                      >
+                        <p className="text-slate-800 font-bold">{n.title}</p>
+                        <p className="text-slate-600 font-medium leading-relaxed mt-0.5">{n.message}</p>
+                        <span className="text-[10px] text-slate-400 mt-1 block text-right font-semibold">
+                          {formatTurkeyDateTime(n.createdAt)}
+                        </span>
+                      </button>
+                    ))
+                  )}
                 </div>
               </div>
             )}
           </div>
-          <button onClick={handleLogout} className="text-sm font-bold px-5 py-2.5 text-rose-600 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition shadow-sm">Çıkış Yap</button>
+          <button
+            onClick={handleLogout}
+            className="text-sm font-bold px-5 py-2.5 text-rose-600 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition shadow-sm"
+          >
+            Çıkış Yap
+          </button>
         </header>
-        
-        <div className="flex-1 relative overflow-hidden bg-slate-50">
+
+        <div className="flex-1 relative overflow-hidden bg-slate-50 z-0">
           {showMapBackground ? (
             <>
               <div className="absolute inset-0 z-0">
                 <MapView markers={filteredMarkers} center={[37.420, 31.848]} focusedMarkerPosition={focusedMarkerPosition} />
               </div>
               {showSlatPanel && (
-                <div className={`absolute top-0 bottom-0 w-100 bg-white border-r border-slate-200 shadow-2xl z-20 overflow-hidden flex flex-col transition-all duration-300 ease-in-out ${isMenuOpen ? 'left-44' : 'left-0'}`}>
+                <div
+                  className={`absolute top-0 bottom-0 w-100 bg-white border-r border-slate-200 shadow-2xl z-20 overflow-hidden flex flex-col transition-all duration-300 ease-in-out ${isMenuOpen ? 'left-44' : 'left-0'}`}
+                >
                   <div className="flex-1 overflow-y-auto">
                     <Outlet context={outletContextValue} />
                   </div>
@@ -282,8 +368,8 @@ export default function MainLayout() {
               )}
             </>
           ) : (
-            <div className="absolute inset-0 z-20 overflow-y-auto p-6 bg-slate-50">
-              <Outlet context={outletContextValue} /> 
+            <div className="absolute inset-0 z-0 overflow-y-auto p-6 bg-slate-50">
+              <Outlet context={outletContextValue} />
             </div>
           )}
         </div>

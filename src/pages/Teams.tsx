@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
+import { trIncludes } from '../utils/trSearch';
 
 interface TeamMemberData {
   id: string;
@@ -80,9 +81,10 @@ export default function Teams() {
   });
   const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
 
-  const { setFocusedMarkerPosition, refreshMapData } = useOutletContext<{
+  const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
     setFocusedMarkerPosition: (pos: [number, number] | null) => void;
     refreshMapData: () => Promise<void>;
+    partnerKey?: string;
   }>();
 
   const [refreshingLocations, setRefreshingLocations] = useState(false);
@@ -155,7 +157,7 @@ export default function Teams() {
 
     initPageData();
     return () => { isMounted = false; };
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, partnerKey]);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -250,8 +252,8 @@ export default function Teams() {
   };
 
   const filteredTeams = teams.filter(team => 
-    team.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    team.plate.toLowerCase().includes(searchTerm.toLowerCase())
+    trIncludes(team.name, searchTerm) || 
+    trIncludes(team.plate, searchTerm)
   );
 
   const assignedJobs = allWorkOrders.filter(order => order.assignedToUserId === selectedTeam?.id);

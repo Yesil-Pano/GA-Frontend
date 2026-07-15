@@ -1,5 +1,6 @@
 // src/pages/Reports.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
 interface PersonnelOption {
@@ -73,6 +74,7 @@ const emptyFilters = {
 };
 
 export default function Reports() {
+  const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
   const [filters, setFilters] = useState(emptyFilters);
   const [personnel, setPersonnel] = useState<PersonnelOption[]>([]);
   const [cities, setCities] = useState<CityOption[]>([]);
@@ -118,7 +120,7 @@ export default function Reports() {
     };
     loadLookups();
     return () => { cancelled = true; };
-  }, []);
+  }, [partnerKey]);
 
   useEffect(() => {
     let cancelled = false;

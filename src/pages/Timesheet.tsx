@@ -1,5 +1,6 @@
 // src/pages/Timesheet.tsx
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
 // --- GÜÇLÜ TİP SÖZLEŞMELERİ (INTERFACE) ---
@@ -40,6 +41,7 @@ interface LookupData {
 }
 
 export default function Timesheet() {
+  const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
   // Zaman ve Görünüm Kontrolleri
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [view, setView] = useState<'Month' | 'Week' | 'Day'>('Month');
@@ -120,7 +122,7 @@ export default function Timesheet() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [partnerKey]);
 
   // SÜZGEÇTEN GEÇEN İŞ EMİRLERİ
   const filteredOrders = orders.filter(o => {

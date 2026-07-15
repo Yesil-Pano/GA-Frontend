@@ -1,5 +1,6 @@
 // src/pages/Planning.tsx
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 
 interface PeriodicOrder {
@@ -25,11 +26,13 @@ const intervalLabel = (value?: string) => {
 };
 
 export default function Planning() {
+  const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
   const [periodicJobs, setPeriodicJobs] = useState<PeriodicOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchPeriodics = async () => {
+      setIsLoading(true);
       try {
         const response = await api.get('/workorders');
         const filtered = response.data.filter(
@@ -43,7 +46,7 @@ export default function Planning() {
       }
     };
     fetchPeriodics();
-  }, []);
+  }, [partnerKey]);
 
   return (
     <div className="absolute inset-0 z-20 bg-slate-50 p-6 overflow-y-auto w-full h-full pointer-events-auto">
@@ -65,7 +68,7 @@ export default function Planning() {
           </div>
         ) : (
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-brand-navy uppercase tracking-wider border-b pb-2 text-slate-500">
+            <h3 className="text-xs font-bold text-brand-navy uppercase tracking-wider border-b pb-2">
               Aktif Tekrarlanan Görev Listesi ({periodicJobs.length})
             </h3>
             {periodicJobs.map((job) => (

@@ -1,7 +1,8 @@
 // src/pages/WorkOrders.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
+import { trIncludes } from '../utils/trSearch';
 
 interface WorkOrderData {
   id: string;
@@ -135,10 +136,12 @@ export default function WorkOrders() {
     projectId: '', stationId: '', cityId: '', districtId: '',
   });
 
-  const { setFocusedMarkerPosition, refreshMapData } = useOutletContext<{
+  const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
     setFocusedMarkerPosition: (pos: [number, number] | null) => void;
     refreshMapData: () => Promise<void>;
+    partnerKey?: string;
   }>();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const filteredOrders = orders
     .filter(order => {
@@ -148,7 +151,7 @@ export default function WorkOrders() {
       if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
       return order.status === filter;
     })
-    .filter(order => searchTerm === '' || order.title.toLowerCase().includes(searchTerm.toLowerCase()) || order.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
+    .filter(order => searchTerm === '' || trIncludes(order.title, searchTerm) || trIncludes(order.customerName, searchTerm));
 
   const handleSelectAll = () => {
     if (selectedOrders.length === filteredOrders.length && filteredOrders.length > 0) {
@@ -177,7 +180,7 @@ export default function WorkOrders() {
     photoUrlsRef.current = [];
   };
 
-  const loadOrderPhotos = async (workOrderId: string) => {
+  const loadOrderPhotos = useCallback(async (workOrderId: string) => {
     setLoadingPhotos(true);
     revokePhotoUrls();
     setOrderPhotos([]);
@@ -206,9 +209,9 @@ export default function WorkOrders() {
     } finally {
       setLoadingPhotos(false);
     }
-  };
+  }, []);
 
-  const openDetailModal = (order: WorkOrderData) => {
+  const openDetailModal = useCallback((order: WorkOrderData) => {
     setSelectedOrder(order);
     setAssignUserId(order.assignedToUserId || '');
     setIsEditingDetail(false);
@@ -234,8 +237,8 @@ export default function WorkOrders() {
         : 'Haftalik',
     });
     setIsDetailModalOpen(true);
-    loadOrderPhotos(order.id);
-  };
+    void loadOrderPhotos(order.id);
+  }, [loadOrderPhotos]);
 
   const closeDetailModal = () => {
     revokePhotoUrls();
@@ -459,7 +462,30 @@ export default function WorkOrders() {
     };
     loadInitialData();
     return () => { isMounted = false; };
-  }, []);
+  }, [partnerKey]);
+
+  // Bildirimden ?open=id ile gelindiğinde detayı aç (setState effect içinde senkron olmasın)
+  const pendingOpenId = searchParams.get('open');
+  const handledOpenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingOpenId || orders.length === 0) return;
+    if (handledOpenRef.current === pendingOpenId) return;
+    const found = orders.find((o) => o.id === pendingOpenId);
+    if (!found) return;
+
+    handledOpenRef.current = pendingOpenId;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (cancelled) return;
+      openDetailModal(found);
+      setSearchParams({}, { replace: true });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [pendingOpenId, orders, openDetailModal, setSearchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -953,7 +979,7 @@ export default function WorkOrders() {
                   if (category === 'DIGER' && photos.length === 0) return null;
                   const title =
                     category === 'ISG' ? 'İSG Fotoğrafları' :
-                    category === 'OPERASYON' ? 'Operasyon Fotoğrafları' :
+                    category === 'OPERASYON' ? 'Operasyoncu Fotoğrafları' :
                     'Diğer Fotoğraflar';
                   return (
                     <div key={category}>
