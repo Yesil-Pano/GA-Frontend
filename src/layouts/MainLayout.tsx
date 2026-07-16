@@ -188,6 +188,7 @@ export default function MainLayout() {
     { path: '/timesheet', label: 'Zaman Çizelgesi', icon: '📅' },
     { path: '/planning', label: 'Planlama', icon: '🗓️' },
     { path: '/reports', label: 'Raporlama', icon: '📄' },
+    { path: '/chat', label: 'Sohbet', icon: '💬' },
     { path: '/settings', label: 'Ayarlar', icon: '⚙️' },
   ];
 

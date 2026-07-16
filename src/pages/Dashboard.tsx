@@ -147,9 +147,9 @@ export default function Dashboard() {
           <h2 className="text-sm font-bold text-slate-600 mb-4">İş Tamamlama Havuz Sayıları</h2>
           <div className="h-40 flex items-end justify-around border-b border-l border-slate-200 pl-2 pb-1 relative text-xs font-bold">
             <div className="flex flex-col items-center w-12"><div className="bg-amber-400 w-8 rounded-t transition-all" style={{ height: `${stats.bekliyorCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">Bekleyen</span></div>
-            <div className="flex flex-col items-center w-12"><div className="bg-blue-400 w-8 rounded-t transition-all" style={{ height: `${stats.devamEdiyorCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">DevamEden</span></div>
+            <div className="flex flex-col items-center w-12"><div className="bg-blue-400 w-8 rounded-t transition-all" style={{ height: `${stats.devamEdiyorCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">Devam Eden</span></div>
             <div className="flex flex-col items-center w-12"><div className="bg-emerald-500 w-8 rounded-t transition-all" style={{ height: `${stats.tamamlandiCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">Tamamlanan</span></div>
-            <div className="flex flex-col items-center w-12"><div className="bg-rose-500 w-8 rounded-t transition-all" style={{ height: `${stats.iptalEdildiCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">İptalEdilen</span></div>
+            <div className="flex flex-col items-center w-12"><div className="bg-rose-500 w-8 rounded-t transition-all" style={{ height: `${stats.iptalEdildiCount * 20 || 4}px` }}></div><span className="text-[9px] text-slate-500 mt-1">İptal Edilen</span></div>
           </div>
         </div>
 

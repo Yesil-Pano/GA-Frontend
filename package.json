@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@microsoft/signalr": "^10.0.0",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/leaflet.markercluster": "^1.5.6",
     "axios": "^1.18.0",

@@ -8,7 +8,8 @@ import {
   MapPin, 
   Users, 
   Settings, 
-  LogOut 
+  LogOut,
+  MessageCircle,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -28,6 +29,7 @@ const Sidebar: React.FC = () => {
     { name: 'Ayarlar', path: '/settings', icon: <Settings size={20} /> },
     { name: 'Takımlar', path: '/teams', icon: <Briefcase size={20} /> },
     { name: 'Anketler', path: '/surveys', icon: <Briefcase size={20} /> },
+    { name: 'Sohbet', path: '/chat', icon: <MessageCircle size={20} /> },
     { name: 'Zaman Çizelgesi', path: '/timesheet', icon: <Briefcase size={20} /> },
   ];
 

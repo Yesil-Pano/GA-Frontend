@@ -13,6 +13,7 @@ import Timesheet from './pages/Timesheet';
 import Planning from './pages/Planning';
 import Reports from './pages/Reports';
 import AdminPanel from './pages/AdminPanel';
+import Chat from './pages/Chat';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem('token');
@@ -36,6 +37,7 @@ function App() {
           <Route path="timesheet" element={<Timesheet />} />
           <Route path="planning" element={<Planning />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="chat" element={<Chat />} />
           <Route path="admin-panel" element={<AdminPanel />} />
         </Route>
       </Routes>
