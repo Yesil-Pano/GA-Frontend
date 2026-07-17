@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
+import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
 
 interface StationData {
   id: string;
@@ -259,11 +260,20 @@ export default function MapPage() {
         ) : filteredStations.length === 0 ? (
           <p className="text-sm text-slate-400 text-center mt-10">Kayıtlı saha noktası bulunmuyor.</p>
         ) : (
-          filteredStations.map((station) => (
+          filteredStations.map((station) => {
+            const pk = resolvePartnerKey({
+              tenantId: station.tenantId,
+              ownerCompany: station.ownerCompany,
+              name: station.name,
+            });
+            const partner = pk ? getPartnerByKey(pk) : null;
+            const accent = partnerKey === 'all' ? getPartnerColor(pk) : undefined;
+            return (
             <div
               key={station.id}
               onClick={() => station.position && setFocusedMarkerPosition([...station.position])}
-              className={`bg-white rounded-xl shadow-md border p-4 cursor-pointer hover:shadow-lg transition group flex gap-3 ${selectedIds.includes(station.id) ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200 border-l-[6px] border-l-blue-500'}`}
+              className={`bg-white rounded-xl shadow-md border p-4 cursor-pointer hover:shadow-lg transition group flex gap-3 ${selectedIds.includes(station.id) ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200 border-l-[6px]'}`}
+              style={selectedIds.includes(station.id) ? undefined : { borderLeftColor: accent || '#3B82F6' }}
             >
               <input
                 type="checkbox"
@@ -273,7 +283,17 @@ export default function MapPage() {
                 onClick={(e) => e.stopPropagation()}
               />
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors mb-2 truncate">📍 {station.name}</h3>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h3 className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">📍 {station.name}</h3>
+                  {partnerKey === 'all' && partner && partner.key !== 'all' && (
+                    <span
+                      className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white"
+                      style={{ backgroundColor: partner.color }}
+                    >
+                      {partner.name}
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-1 text-xs text-slate-600 font-medium">
                   <div><span className="font-bold text-slate-400">İl:</span> {station.city}{station.district ? ` / ${station.district}` : ''} | <span className="font-bold text-slate-400">Güç:</span> {station.powerType}</div>
                   <div><span className="font-bold text-slate-400">Durum:</span> <span className="text-emerald-600 font-bold">{station.statusType}</span></div>
@@ -288,7 +308,8 @@ export default function MapPage() {
                 </div>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -332,8 +353,8 @@ export default function MapPage() {
           <div><label className="block text-xs font-bold mb-1">Kategori</label><input className="w-full border rounded-lg p-2.5" value={bulkForm.category} onChange={(e) => setBulkForm({ ...bulkForm, category: e.target.value })} /></div>
           <div><label className="block text-xs font-bold mb-1">Öncelik</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.priority} onChange={(e) => setBulkForm({ ...bulkForm, priority: e.target.value })}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
           <div className="flex gap-2">
-            <div className="flex-1"><label className="block text-xs font-bold mb-1">Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => setBulkForm({ ...bulkForm, startDate: e.target.value })} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold mb-1">Bitiş</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.endDate} onChange={(e) => setBulkForm({ ...bulkForm, endDate: e.target.value })} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold mb-1">Planlanan Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => setBulkForm({ ...bulkForm, startDate: e.target.value })} /></div>
+            <div className="flex-1"><label className="block text-xs font-bold mb-1">Planlanan Bitiş</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.endDate} onChange={(e) => setBulkForm({ ...bulkForm, endDate: e.target.value })} /></div>
           </div>
           <div><label className="block text-xs font-bold mb-1">Genel Açıklama</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.description} onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })} /></div>
           <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>

@@ -7,9 +7,11 @@ import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
 import {
-  PARTNERS,
+  SUPER_ADMIN_PARTNERS,
   getPartnerByKey,
+  getPartnerColor,
   getStoredPartnerKey,
+  resolvePartnerKey,
   storePartnerKey,
   type PartnerKey,
   type PartnerOption,
@@ -85,44 +87,68 @@ export default function MainLayout() {
       if (location.pathname.startsWith('/work-orders')) {
         const response = await api.get('/workorders');
         const mapped = response.data.map((w: {
-          id: string; title: string; customerName: string; priority: string; description: string; position: [number, number];
-        }) => ({
-          id: w.id,
-          title: w.customerName || w.title,
-          subtitle: w.description,
-          position: w.position,
-          priority: w.priority,
-          type: 'Saha' as const,
-        }));
+          id: string; title: string; customerName: string; priority: string; description: string;
+          position: [number, number]; tenantId?: string;
+        }) => {
+          const pk = resolvePartnerKey({ tenantId: w.tenantId, name: w.customerName });
+          const partner = pk ? getPartnerByKey(pk) : null;
+          return {
+            id: w.id,
+            title: w.customerName || w.title,
+            subtitle: w.description,
+            position: w.position,
+            priority: w.priority,
+            type: 'Saha' as const,
+            partnerColor: getPartnerColor(pk),
+            partnerName: partner && partner.key !== 'all' ? partner.name : undefined,
+          };
+        });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/teams')) {
         const response = await api.get('/teams');
         const mapped = response.data.map((t: {
           id: string; name: string; project: string; plate: string; position: [number, number];
-          hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
-        }) => ({
-          id: t.id,
-          title: t.name,
-          subtitle: t.hasLiveLocation
-            ? `Canlı konum${t.locationUpdatedAt ? ` · ${formatTurkeyDateTime(t.locationUpdatedAt)}` : ''} | Plaka: ${t.plate}`
-            : `Plaka: ${t.plate} | Proje: ${t.project}`,
-          position: t.position,
-          priority: t.hasLiveLocation ? 'Acil' : 'Orta',
-          type: 'Saha' as const,
-        }));
+          tenantId?: string; hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
+        }) => {
+          const pk = resolvePartnerKey({ tenantId: t.tenantId, name: t.project });
+          const partner = pk ? getPartnerByKey(pk) : null;
+          return {
+            id: t.id,
+            title: t.name,
+            subtitle: t.hasLiveLocation
+              ? `Canlı konum${t.locationUpdatedAt ? ` · ${formatTurkeyDateTime(t.locationUpdatedAt)}` : ''} | Plaka: ${t.plate}`
+              : `Plaka: ${t.plate} | Proje: ${t.project}`,
+            position: t.position,
+            priority: t.hasLiveLocation ? 'Acil' : 'Orta',
+            type: 'Saha' as const,
+            partnerColor: getPartnerColor(pk),
+            partnerName: partner && partner.key !== 'all' ? partner.name : undefined,
+          };
+        });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/map')) {
         const response = await api.get('/stations');
         const mapped = response.data.map((s: {
           id: string; name: string; statusType: string; city: string; position: [number, number];
-        }) => ({
-          id: s.id,
-          title: s.name,
-          subtitle: `${s.city} - ${s.statusType}`,
-          position: s.position,
-          priority: 'Orta',
-          type: 'Nokta' as const,
-        }));
+          ownerCompany?: string | null; tenantId?: string;
+        }) => {
+          const pk = resolvePartnerKey({
+            tenantId: s.tenantId,
+            ownerCompany: s.ownerCompany,
+            name: s.name,
+          });
+          const partner = pk ? getPartnerByKey(pk) : null;
+          return {
+            id: s.id,
+            title: s.name,
+            subtitle: `${s.city} - ${s.statusType}`,
+            position: s.position,
+            priority: 'Orta',
+            type: 'Nokta' as const,
+            partnerColor: getPartnerColor(pk),
+            partnerName: partner && partner.key !== 'all' ? partner.name : undefined,
+          };
+        });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/surveys')) {
         const response = await api.get('/surveys');
@@ -243,7 +269,13 @@ export default function MainLayout() {
               className={`w-full flex items-center bg-[#1A233A] text-white rounded-lg py-2.5 border border-slate-600 hover:bg-slate-700 transition-all duration-300 shadow-inner ${isMenuOpen ? 'px-3 justify-between' : 'justify-center'}`}
             >
               <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
-                <div className="w-5 h-5 min-w-5 bg-brand-orange rounded-full flex items-center justify-center text-brand-navy font-bold text-[10px] shrink-0">
+                <div
+                  className="w-5 h-5 min-w-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border border-white/30"
+                  style={{
+                    backgroundColor: activePartner.color,
+                    color: activePartner.color === '#000000' ? '#FFFFFF' : '#1A233A',
+                  }}
+                >
                   {activePartner.letter}
                 </div>
                 <span className={`text-sm font-medium transition-all duration-300 tracking-wide truncate ${isMenuOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 pointer-events-none'}`}>
@@ -257,13 +289,19 @@ export default function MainLayout() {
 
             {isPartnerDropdownOpen && isMenuOpen && (
               <div className="absolute left-3 right-3 mt-1 bg-[#1A233A] border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 text-xs">
-                {PARTNERS.map((partner) => (
+                {SUPER_ADMIN_PARTNERS.map((partner) => (
                   <button
                     key={partner.key}
                     onClick={() => handlePartnerSelect(partner)}
                     className={`w-full text-left px-3 py-2.5 hover:bg-brand-orange hover:text-brand-navy transition-colors flex items-center gap-2 ${activePartner.key === partner.key ? 'text-brand-orange font-bold' : 'text-slate-300'}`}
                   >
-                    <span className="w-4 h-4 rounded-full bg-slate-800 text-white flex items-center justify-center text-[9px] font-bold">
+                    <span
+                      className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold border border-white/20"
+                      style={{
+                        backgroundColor: partner.color,
+                        color: partner.color === '#000000' ? '#FFFFFF' : '#1A233A',
+                      }}
+                    >
                       {partner.letter}
                     </span>
                     <span className="truncate">{partner.name}</span>

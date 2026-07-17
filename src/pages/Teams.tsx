@@ -4,12 +4,14 @@ import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { trIncludes } from '../utils/trSearch';
+import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
 
 interface TeamMemberData {
   id: string;
   name: string;
   username: string; 
-  email: string;    
+  email: string;
+  tenantId?: string;
   project: string;
   projectIds: string[]; 
   plate: string;
@@ -303,18 +305,29 @@ export default function Teams() {
         ) : filteredTeams.length === 0 ? (
           <p className="text-sm text-slate-400 text-center mt-10">Kayıtlı ekip bulunmuyor.</p>
         ) : (
-          filteredTeams.map((team) => (
+          filteredTeams.map((team) => {
+            const pk = resolvePartnerKey({ tenantId: team.tenantId, name: team.project });
+            const partner = pk ? getPartnerByKey(pk) : null;
+            const accent = partnerKey === 'all' ? getPartnerColor(pk) : '#B4D334';
+            return (
             <div 
               key={team.id}
               onClick={() => team.position && setFocusedMarkerPosition([...team.position])}
-              className="bg-white rounded-xl shadow-md border border-slate-200 border-l-[6px] border-l-[#B4D334] p-4 cursor-pointer hover:shadow-lg transition relative group"
+              className="bg-white rounded-xl shadow-md border border-slate-200 border-l-[6px] p-4 cursor-pointer hover:shadow-lg transition relative group"
+              style={{ borderLeftColor: accent }}
             >
               <div className="flex justify-between items-start mb-2">
-                <label className="flex items-center gap-3 cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-brand-orange" />
-                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors">{team.name}</span>
+                <label className="flex items-center gap-3 cursor-pointer min-w-0" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-brand-orange shrink-0" />
+                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">{team.name}</span>
                 </label>
-                <span className="text-xl">📇</span>
+                {partnerKey === 'all' && partner && partner.key !== 'all' ? (
+                  <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: partner.color }}>
+                    {partner.name}
+                  </span>
+                ) : (
+                  <span className="text-xl">📇</span>
+                )}
               </div>
 
               <div className="space-y-1 text-xs text-slate-700 font-medium pl-7">
@@ -365,7 +378,8 @@ export default function Teams() {
                 </button>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

@@ -3,11 +3,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
+import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
+import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '../utils/dateTime';
 
 interface WorkOrderData {
   id: string;
   title: string;
   customerName: string;
+  tenantId?: string;
   priority: string;
   status: string;
   type: string;
@@ -17,6 +20,9 @@ interface WorkOrderData {
   address: string;
   startDate: string;
   endDate: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
   position: [number, number];
   operationUserId?: string | null;
   operationUserName: string;
@@ -29,11 +35,6 @@ interface WorkOrderData {
   isPeriodic?: boolean;
   recurrenceInterval?: string;
 }
-
-const toDateTimeLocal = (value?: string | null) => {
-  if (!value) return '';
-  return value.replace(' ', 'T').slice(0, 16);
-};
 
 /** datetime-local için bugünün yerel tarihi (YYYY-MM-DDTHH:mm) */
 const todayDateTimeLocal = (hour: number, minute = 0) => {
@@ -82,6 +83,17 @@ interface LookupData {
 }
 
 export default function WorkOrders() {
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+  if (token) {
+    try {
+      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch {
+      /* ignore */
+    }
+  }
+
   const [filter, setFilter] = useState('Tümü');
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
@@ -221,8 +233,8 @@ export default function WorkOrders() {
       priority: order.priority || 'Orta',
       type: order.type || 'Arıza',
       category: order.category || 'Arıza Bildirimi',
-      startDate: toDateTimeLocal(order.startDate),
-      endDate: toDateTimeLocal(order.endDate),
+      startDate: toTurkeyDateTimeLocal(order.startDate),
+      endDate: toTurkeyDateTimeLocal(order.endDate),
       lat: order.position?.[0] ?? 0,
       lng: order.position?.[1] ?? 0,
       description: order.description || '',
@@ -593,11 +605,21 @@ export default function WorkOrders() {
         ) : filteredOrders.length === 0 ? (
           <p className='text-sm text-slate-500 text-center mt-10'>Aranan kriterde iş emri bulunamadı.</p>
         ) : (
-          filteredOrders.map((order) => (
+          filteredOrders.map((order) => {
+            const pk = resolvePartnerKey({ tenantId: order.tenantId, name: order.customerName });
+            const partner = pk ? getPartnerByKey(pk) : null;
+            return (
             <div key={order.id} onClick={() => order.position && setFocusedMarkerPosition([...order.position])} className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''}`}>
               <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
               <div className="flex-1 min-w-0">
-                <h3 className="text-base font-bold text-brand-navy mb-2 truncate">Nokta Adı: {order.customerName || order.title}</h3>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h3 className="text-base font-bold text-brand-navy truncate">Nokta Adı: {order.customerName || order.title}</h3>
+                  {partnerKey === 'all' && partner && partner.key !== 'all' && (
+                    <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: partner.color }}>
+                      {partner.name}
+                    </span>
+                  )}
+                </div>
                 <div className="flex flex-col gap-1.5 text-xs mb-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">İş Tipi</span>
@@ -617,7 +639,8 @@ export default function WorkOrders() {
                 </div>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -804,21 +827,55 @@ export default function WorkOrders() {
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label>
                 <input
-                  type={isEditingDetail ? 'datetime-local' : 'text'}
-                  disabled={!isEditingDetail}
-                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail ? editFormData.startDate : (selectedOrder.startDate || '')}
+                  type={isEditingDetail && isSuperAdmin ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdmin)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdmin ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail && isSuperAdmin ? editFormData.startDate : (formatTurkeyDateTime(selectedOrder.startDate) || '—')}
                   onChange={(e) => setEditFormData({ ...editFormData, startDate: e.target.value })}
+                  title={!isSuperAdmin ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
                 />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Bitiş</label>
                 <input
-                  type={isEditingDetail ? 'datetime-local' : 'text'}
-                  disabled={!isEditingDetail}
-                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail ? editFormData.endDate : (selectedOrder.endDate || '')}
+                  type={isEditingDetail && isSuperAdmin ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdmin)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdmin ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail && isSuperAdmin ? editFormData.endDate : (formatTurkeyDateTime(selectedOrder.endDate) || '—')}
                   onChange={(e) => setEditFormData({ ...editFormData, endDate: e.target.value })}
+                  title={!isSuperAdmin ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Gerçek Başlangıç</label>
+                <input
+                  disabled
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed"
+                  value={formatTurkeyDateTime(selectedOrder.startedAt) || '—'}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">
+                  {selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi'
+                    ? 'İptal Tarihi'
+                    : 'Bitiş Tarihi'}
+                </label>
+                <input
+                  disabled
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed"
+                  value={
+                    selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi'
+                      ? (formatTurkeyDateTime(selectedOrder.cancelledAt) || '—')
+                      : (formatTurkeyDateTime(selectedOrder.completedAt) || '—')
+                  }
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Süre (dk)</label>
+                <input
+                  disabled
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed"
+                  value={durationMinutes(selectedOrder.startedAt, selectedOrder.completedAt) ?? '—'}
                 />
               </div>
               <div>

@@ -32,6 +32,10 @@ interface ReportRow {
   address: string;
   startDate: string;
   endDate: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  durationMinutes?: number | null;
   openedByUserName: string;
   assignedToUserName: string;
   cityName?: string | null;
@@ -335,16 +339,19 @@ export default function Reports() {
                 <th className="px-4 py-3 font-bold">İl / İlçe</th>
                 <th className="px-4 py-3 font-bold">Açan</th>
                 <th className="px-4 py-3 font-bold">Atanan</th>
-                <th className="px-4 py-3 font-bold">Başlangıç</th>
+                <th className="px-4 py-3 font-bold">Planlanan Başl.</th>
+                <th className="px-4 py-3 font-bold">Gerçek Başl.</th>
+                <th className="px-4 py-3 font-bold">Bitiş / İptal</th>
+                <th className="px-4 py-3 font-bold">Süre (dk)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400 font-semibold">Yükleniyor...</td></tr>
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400 font-semibold">Yükleniyor...</td></tr>
               ) : !hasSearched ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400 font-semibold">Henüz sorgu çalıştırılmadı.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400 font-semibold">Henüz sorgu çalıştırılmadı.</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400 font-semibold">Kayıt bulunamadı.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400 font-semibold">Kayıt bulunamadı.</td></tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50/80">
@@ -360,7 +367,14 @@ export default function Reports() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">{row.openedByUserName}</td>
                     <td className="px-4 py-3 text-slate-700">{row.assignedToUserName}</td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.startDate}</td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.startDate || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.startedAt || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                      {row.cancelledAt || row.completedAt || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700 font-semibold whitespace-nowrap">
+                      {row.durationMinutes != null ? row.durationMinutes : '—'}
+                    </td>
                   </tr>
                 ))
               )}
