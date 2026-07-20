@@ -1,5 +1,5 @@
 // src/pages/WorkOrders.tsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
@@ -35,17 +35,6 @@ interface WorkOrderData {
   isPeriodic?: boolean;
   recurrenceInterval?: string;
 }
-
-/** datetime-local için bugünün yerel tarihi (YYYY-MM-DDTHH:mm) */
-const todayDateTimeLocal = (hour: number, minute = 0) => {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const hh = String(hour).padStart(2, '0');
-  const mm = String(minute).padStart(2, '0');
-  return `${y}-${m}-${d}T${hh}:${mm}`;
-};
 
 interface OrderPhoto {
   id: string;
@@ -97,8 +86,6 @@ export default function WorkOrders() {
   const [filter, setFilter] = useState('Tümü');
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [lookups, setLookups] = useState<LookupData>({ 
     personnel: [], 
@@ -116,6 +103,11 @@ export default function WorkOrders() {
   const photoUrlsRef = useRef<string[]>([]);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [assignUserId, setAssignUserId] = useState('');
+  const [lightbox, setLightbox] = useState<{
+    photos: OrderPhoto[];
+    index: number;
+    title: string;
+  } | null>(null);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isEditingDetail, setIsEditingDetail] = useState(false);
   const [isSavingDetail, setIsSavingDetail] = useState(false);
@@ -137,15 +129,6 @@ export default function WorkOrders() {
     assignedToUserId: '',
     isPeriodic: false,
     recurrenceInterval: 'Haftalik',
-  });
-
-  const [formData, setFormData] = useState({
-    title: '', customerName: '', description: '', mobileDescription: '', address: '',
-    priority: 'Orta', workType: 'Arıza', workCategory: 'Arıza Bildirimi',
-    startDate: todayDateTimeLocal(9), endDate: todayDateTimeLocal(18), lat: 39.92, lng: 32.85,
-    operationUserId: '', openedByUserId: '', assignedToUserId: '',
-    isPeriodic: false, recurrenceInterval: 'None',
-    projectId: '', stationId: '', cityId: '', districtId: '',
   });
 
   const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
@@ -176,15 +159,6 @@ export default function WorkOrders() {
   const handleSelectOne = (id: string) => {
     if (selectedOrders.includes(id)) setSelectedOrders(prev => prev.filter(orderId => orderId !== id));
     else setSelectedOrders(prev => [...prev, id]);
-  };
-
-  const fetchOrders = async () => {
-    try {
-      const response = await api.get('/workorders');
-      setOrders(response.data);
-    } catch (error) {
-      console.error("Veriler çekilemedi:", error);
-    }
   };
 
   const revokePhotoUrls = () => {
@@ -337,6 +311,10 @@ export default function WorkOrders() {
         message: string;
         assignedToUserId: string | null;
         assignedToUserName: string;
+        operationUserId?: string | null;
+        operationUserName?: string;
+        openedByUserId?: string | null;
+        openedByUserName?: string;
       }>(`/workorders/${selectedOrder.id}/assign`, {
         assignedToUserId: assignUserId || null,
       });
@@ -345,8 +323,18 @@ export default function WorkOrders() {
         ...selectedOrder,
         assignedToUserId: data.assignedToUserId,
         assignedToUserName: data.assignedToUserName,
+        operationUserId: data.operationUserId ?? selectedOrder.operationUserId,
+        operationUserName: data.operationUserName ?? selectedOrder.operationUserName,
+        openedByUserId: data.openedByUserId ?? selectedOrder.openedByUserId,
+        openedByUserName: data.openedByUserName ?? selectedOrder.openedByUserName,
       };
       setSelectedOrder(updated);
+      setEditFormData((prev) => ({
+        ...prev,
+        assignedToUserId: data.assignedToUserId || '',
+        operationUserId: data.operationUserId || prev.operationUserId,
+        openedByUserId: data.openedByUserId || prev.openedByUserId,
+      }));
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
       alert(data.message || 'Atama güncellendi.');
     } catch (error) {
@@ -357,45 +345,88 @@ export default function WorkOrders() {
     }
   };
 
-  const filteredStationsForForm = lookups.stations.filter((station) => {
-    if (!formData.projectId) return true;
-    const project = lookups.projects.find((p) => p.id === formData.projectId);
-    if (!project) return true;
-
-    const tokens = project.name
-      .split(/[\s\-/]+/)
-      .map((t) => t.toLowerCase())
-      .filter((t) => t.length >= 3);
-
-    const tenantMatch = station.tenantId === project.tenantId;
-    if (!tokens.length) return tenantMatch;
-
-    const owner = (station.ownerCompany || '').toLowerCase();
-    const name = (station.name || '').toLowerCase();
-    const ownershipMatch = tokens.some((token) => owner.includes(token) || name.includes(token));
-    return ownershipMatch || tenantMatch;
-  });
-
-  const handleStationSelect = (stationId: string) => {
-    const station = lookups.stations.find((s) => s.id === stationId);
-    if (!station) {
-      setFormData((prev) => ({ ...prev, stationId: '', cityId: '', districtId: '' }));
-      return;
+  const handleBulkApprove = async () => {
+    if (selectedOrders.length === 0) return;
+    if (!window.confirm(`${selectedOrders.length} iş emri onaylansın (Tamamlandı) mı?`)) return;
+    try {
+      await api.post('/workorders/bulk-approve', { ids: selectedOrders });
+      setSelectedOrders([]);
+      const res = await api.get('/workorders');
+      setOrders(res.data);
+      await refreshMapData();
+      alert('Seçili iş emirleri onaylandı.');
+    } catch (error) {
+      console.error(error);
+      alert('Toplu onay başarısız.');
     }
-    setFormData((prev) => ({
-      ...prev,
-      stationId,
-      customerName: station.name,
-      address: station.address || prev.address,
-      lat: station.latitude,
-      lng: station.longitude,
-      title: prev.title || `${station.name} iş emri`,
-      cityId: station.cityId || '',
-      districtId: station.districtId || '',
-    }));
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedOrders.length === 0) return;
+    if (!window.confirm(`${selectedOrders.length} iş emri silinsin mi?`)) return;
+    try {
+      await api.post('/workorders/bulk-delete', { ids: selectedOrders });
+      setSelectedOrders([]);
+      const res = await api.get('/workorders');
+      setOrders(res.data);
+      await refreshMapData();
+      alert('Seçili iş emirleri silindi.');
+    } catch (error) {
+      console.error(error);
+      alert('Toplu silme başarısız.');
+    }
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!window.confirm('Bu fotoğraf silinsin mi?')) return;
+    try {
+      await api.delete(`/photos/${photoId}`);
+      setOrderPhotos((prev) => prev.filter((p) => p.id !== photoId));
+      if (lightbox && lightbox.photos[lightbox.index]?.id === photoId) {
+        const nextPhotos = lightbox.photos.filter((p) => p.id !== photoId);
+        if (nextPhotos.length === 0) setLightbox(null);
+        else setLightbox({
+          photos: nextPhotos,
+          index: Math.min(lightbox.index, nextPhotos.length - 1),
+          title: lightbox.title,
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Fotoğraf silinemedi.');
+    }
   };
 
   useEffect(() => () => revokePhotoUrls(), []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setLightbox(null);
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        setLightbox((prev) =>
+          prev
+            ? { ...prev, index: (prev.index + 1) % prev.photos.length }
+            : prev
+        );
+      }
+      if (e.key === 'ArrowLeft') {
+        setLightbox((prev) =>
+          prev
+            ? {
+                ...prev,
+                index: (prev.index - 1 + prev.photos.length) % prev.photos.length,
+              }
+            : prev
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   useEffect(() => {
     let isMounted = true;
@@ -457,14 +488,6 @@ export default function WorkOrders() {
             projects: mappedProjects,
           });
 
-          if (mappedPersonnel.length > 0) {
-            setFormData(prev => ({
-              ...prev,
-              operationUserId: mappedPersonnel[0].id,
-              openedByUserId: mappedPersonnel[0].id,
-              assignedToUserId: '',
-            }));
-          }
         }
       } catch (error) {
         console.error("Veri yükleme hatası:", error);
@@ -499,46 +522,6 @@ export default function WorkOrders() {
     };
   }, [pendingOpenId, orders, openDetailModal, setSearchParams]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      // 🚀 ZIRH: BÜTÜN EKSİK ALANLAR API'YE EKLENDİ
-      await api.post('/workorders', {
-        title: formData.title, 
-        customerName: formData.customerName, 
-        description: formData.description,
-        mobileDescription: formData.mobileDescription, 
-        address: formData.address, 
-        priority: formData.priority,
-        type: formData.workType, 
-        category: formData.workCategory,
-        startDate: new Date(formData.startDate).toISOString(), 
-        endDate: new Date(formData.endDate).toISOString(),
-        latitude: Number(formData.lat), 
-        longitude: Number(formData.lng),
-        operationUserId: formData.operationUserId || null, 
-        openedByUserId: formData.openedByUserId || null, 
-        assignedToUserId: formData.assignedToUserId || null,
-        isPeriodic: formData.isPeriodic, 
-        recurrenceInterval: formData.recurrenceInterval,
-        stationId: formData.stationId || null,
-        cityId: formData.cityId || null,
-        districtId: formData.districtId || null,
-      });
-      setIsFormOpen(false);
-      await fetchOrders();
-      await refreshMapData();
-      setFocusedMarkerPosition([Number(formData.lat), Number(formData.lng)]);
-    } catch (error) {
-      console.error("Kayıt hatası:", error);
-      alert("İş emri kaydedilemedi.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
     <div className="h-full flex flex-col p-4 sm:p-6 bg-slate-50 relative overflow-hidden min-w-0">
       
@@ -565,19 +548,6 @@ export default function WorkOrders() {
             <option value="İptal Edilen">İptal Edilen</option>
             <option value="Atanmamış">Atanmamış İşler</option>
           </select>
-          <button
-            onClick={() => {
-              setFormData((prev) => ({
-                ...prev,
-                startDate: todayDateTimeLocal(9),
-                endDate: todayDateTimeLocal(18),
-              }));
-              setIsFormOpen(true);
-            }}
-            className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors shadow-sm whitespace-nowrap text-sm"
-          >
-            + İş Emri Ekle
-          </button>
         </div>
       </div>
 
@@ -585,8 +555,8 @@ export default function WorkOrders() {
         <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 flex justify-between items-center shadow-md">
           <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
           <div className="flex gap-3">
-            <button className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">✓ Toplu Onayla</button>
-            <button className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
+            <button type="button" onClick={handleBulkApprove} className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">✓ Toplu Onayla</button>
+            <button type="button" onClick={handleBulkDelete} className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
           </div>
         </div>
       )}
@@ -642,111 +612,6 @@ export default function WorkOrders() {
             );
           })
         )}
-      </div>
-
-      <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
-        <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
-          <div className="flex items-center gap-2"><span className="text-emerald-600 font-bold">Formu</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm truncate max-w-50">{formData.customerName || 'Yeni İş Emri'}</span></div>
-          <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-10">
-          <div className="space-y-3 bg-amber-50/60 p-4 rounded-xl border border-amber-100">
-            <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nokta / Proje Seçimi</h4>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Proje (nokta filtresi)</label>
-              <select
-                className="w-full border border-slate-300 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-brand-orange"
-                value={formData.projectId}
-                onChange={(e) => setFormData({ ...formData, projectId: e.target.value, stationId: '' })}
-              >
-                <option value="">Tüm projeler / noktalar</option>
-                {lookups.projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Saha Noktası *</label>
-              <select
-                required
-                className="w-full border border-slate-300 rounded-lg p-2.5 bg-white outline-none focus:ring-2 focus:ring-brand-orange"
-                value={formData.stationId}
-                onChange={(e) => handleStationSelect(e.target.value)}
-              >
-                <option value="">Nokta seçiniz...</option>
-                {filteredStationsForForm.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}{s.city ? ` · ${s.city}` : ''}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-500 mt-1 font-semibold">
-                Nokta seçince müşteri adı, adres ve koordinat otomatik dolar.
-              </p>
-            </div>
-          </div>
-
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx} value={t}>{t}</option>)}</select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx} value={c}>{c}</option>)}</select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Öncelik Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Başlık / İş Özeti</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Müşteri / Pano Adı</label><input required className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-orange outline-none" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} /></div>
-          
-          <div className="flex gap-4">
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Planlanan Başlangıç</label><input type="datetime-local" className="w-full border border-slate-300 rounded-lg p-2.5" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Planlanan Bitiş</label><input type="datetime-local" className="w-full border border-slate-300 rounded-lg p-2.5" value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} /></div>
-          </div>
-          <div className="flex gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Enlem (Lat)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
-          </div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Genel Açıklama</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Mühendis Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
-          
-          <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
-            <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500" checked={formData.isPeriodic} onChange={e => setFormData({...formData, isPeriodic: e.target.checked})} />
-              <span>Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)</span>
-            </label>
-            {formData.isPeriodic && (
-              <div>
-                <label className="block text-[11px] font-bold text-emerald-700 mb-1">Tekrarlanma Döngüsü Sıklığı</label>
-                <select className="w-full border border-emerald-200 rounded-lg p-2 bg-white text-xs font-semibold text-slate-700" value={formData.recurrenceInterval} onChange={e => setFormData({...formData, recurrenceInterval: e.target.value})}>
-                  <option value="Haftalik">Her Hafta Otomatik Açılsın</option>
-                  <option value="Aylik">Her Ay Otomatik Açılsın</option>
-                  <option value="Yillik">Her Yıl Otomatik Açılsın</option>
-                </select>
-                <p className="text-[10px] text-emerald-700/80 mt-1 font-medium">
-                  Periyodik kayıt Planning sayfasında listelenir. Sonraki plan tarihinde sistem otomatik olarak yeni iş emri üretir (arka plan job, ~15 dk).
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-            <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label>
-              <select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>
-                <option value="">Atanmamış</option>
-                {lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
-              </select>
-            </div>
-          </div>
-          
-          <div className="flex gap-3 pt-4 border-t">
-            <button type="button" onClick={() => setIsFormOpen(false)} className="flex-1 border border-slate-300 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-50 transition">İptal</button>
-            <button type="submit" disabled={isSubmitting} className={`flex-1 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-xl shadow-md transition ${isSubmitting ? 'bg-emerald-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-              {isSubmitting ? (
-                <><svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Kaydediliyor...</span></>
-              ) : (<span>✓ Kaydet</span>)}
-            </button>
-          </div>
-        </form>
       </div>
 
       {isDetailModalOpen && selectedOrder && (
@@ -1049,18 +914,28 @@ export default function WorkOrders() {
                         </p>
                       ) : (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                          {photos.map((photo) => (
-                            <a
+                          {photos.map((photo, photoIndex) => (
+                            <div
                               key={photo.id}
-                              href={photo.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="group block rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition"
-                              title={photo.fileName}
+                              className="group relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition"
                             >
-                              <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
-                              <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
-                            </a>
+                              <button
+                                type="button"
+                                className="block w-full text-left"
+                                title={photo.fileName}
+                                onClick={() => setLightbox({ photos, index: photoIndex, title })}
+                              >
+                                <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                                <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePhoto(photo.id)}
+                                className="absolute top-1.5 right-1.5 bg-rose-600/90 hover:bg-rose-700 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow"
+                              >
+                                Sil
+                              </button>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -1107,6 +982,65 @@ export default function WorkOrders() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {lightbox && lightbox.photos.length > 0 && (
+        <div
+          className="fixed inset-0 z-80 bg-slate-950/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between text-white mb-3 gap-3">
+              <p className="text-sm font-bold truncate">
+                {lightbox.title} · {lightbox.index + 1}/{lightbox.photos.length} · {lightbox.photos[lightbox.index].fileName}
+              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="bg-rose-600 hover:bg-rose-700 px-3 py-1.5 rounded-lg text-xs font-bold"
+                  onClick={() => handleDeletePhoto(lightbox.photos[lightbox.index].id)}
+                >
+                  Sil
+                </button>
+                <button type="button" className="text-2xl font-bold px-2" onClick={() => setLightbox(null)}>×</button>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="text-white text-3xl font-bold px-3 py-8 hover:bg-white/10 rounded-xl"
+                onClick={() =>
+                  setLightbox((prev) =>
+                    prev
+                      ? { ...prev, index: (prev.index - 1 + prev.photos.length) % prev.photos.length }
+                      : prev
+                  )
+                }
+              >
+                ‹
+              </button>
+              <img
+                src={lightbox.photos[lightbox.index].url}
+                alt={lightbox.photos[lightbox.index].fileName}
+                className="max-h-[75vh] w-full object-contain rounded-xl bg-black/40"
+              />
+              <button
+                type="button"
+                className="text-white text-3xl font-bold px-3 py-8 hover:bg-white/10 rounded-xl"
+                onClick={() =>
+                  setLightbox((prev) =>
+                    prev ? { ...prev, index: (prev.index + 1) % prev.photos.length } : prev
+                  )
+                }
+              >
+                ›
+              </button>
+            </div>
+            <p className="text-center text-slate-300 text-xs mt-3 font-semibold">
+              Gezinmek için ← → ok tuşları · Esc ile kapat
+            </p>
           </div>
         </div>
       )}

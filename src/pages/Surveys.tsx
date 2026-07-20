@@ -246,18 +246,20 @@ export default function Surveys() {
         )}
       </div>
 
-      {/* SAĞDAN KAYAN FORM PANELİ */}
-      <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '500px' }}>
-        <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs font-bold">
-            <span className="text-blue-600">Trugo/Yeşil Pano Anket Formu</span>
-            <span className="text-slate-400">›</span>
-            <span className="text-brand-navy">Anket Ekle</span>
-          </div>
-          <button type="button" onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-xl px-1">×</button>
-        </div>
+      {/* Anket ekleme — merkez modal */}
+      {isFormOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs font-bold">
+                <span className="text-blue-600">Trugo/Yeşil Pano Anket Formu</span>
+                <span className="text-slate-400">›</span>
+                <span className="text-brand-navy">Anket Ekle</span>
+              </div>
+              <button type="button" onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-xl px-1">×</button>
+            </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar text-xs pb-16">
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar text-xs">
           <div className="text-center bg-slate-50 p-3 rounded-xl border border-slate-100 shrink-0">
             <h2 className="font-extrabold text-brand-navy text-sm">Periyodik Bakım Servis Formu</h2>
             <p className="text-slate-500 text-[11px] font-semibold mt-0.5">Alçak Gerilim Periyodik Kontrol Bakım</p>
@@ -307,12 +309,14 @@ export default function Surveys() {
             />
           </div>
 
-          <div className="flex justify-end gap-6 items-center pt-4 border-t border-slate-200">
-            <button type="button" onClick={() => setIsFormOpen(false)} className="text-rose-500 font-bold hover:underline">İptal</button>
-            <button type="submit" disabled={isSubmitting} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition shadow-md">{isSubmitting ? '...' : '✓ Kaydet'}</button>
+          <div className="flex justify-end gap-3 items-center pt-4 border-t border-slate-200">
+            <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-600 hover:bg-slate-50">İptal</button>
+            <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition shadow-md disabled:opacity-50">{isSubmitting ? '...' : '✓ Kaydet'}</button>
           </div>
-        </form>
-      </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* READ-ONLY DETAY MODALI */}
       {isDetailModalOpen && selectedSurvey && (

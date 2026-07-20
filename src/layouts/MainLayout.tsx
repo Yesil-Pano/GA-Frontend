@@ -54,6 +54,8 @@ export default function MainLayout() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isListPanelHidden, setIsListPanelHidden] = useState(false);
+  const [listPanelPath, setListPanelPath] = useState(location.pathname);
 
   const token = localStorage.getItem('token');
   let isSuperAdmin = false;
@@ -68,7 +70,9 @@ export default function MainLayout() {
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const { data } = await api.get<{ unread: number; items: AppNotificationItem[] }>('/notifications');
+      const { data } = await api.get<{ unread: number; items: AppNotificationItem[] }>('/notifications', {
+        params: { take: 10 },
+      });
       setNotifications(data.items || []);
       setUnreadCount(data.unread || 0);
     } catch (error) {
@@ -77,15 +81,24 @@ export default function MainLayout() {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
-    const id = window.setInterval(fetchNotifications, 60_000);
-    return () => window.clearInterval(id);
+    const timeoutId = window.setTimeout(() => {
+      void fetchNotifications();
+    }, 0);
+    const intervalId = window.setInterval(() => {
+      void fetchNotifications();
+    }, 60_000);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+    };
   }, [fetchNotifications]);
+
+  const partnerKey = activePartner.key as PartnerKey;
 
   const fetchMapData = useCallback(async () => {
     try {
       if (location.pathname.startsWith('/work-orders')) {
-        const response = await api.get('/workorders');
+        const response = await api.get('/workorders', { params: { partnerKey } });
         const mapped = response.data.map((w: {
           id: string; title: string; customerName: string; priority: string; description: string;
           position: [number, number]; tenantId?: string;
@@ -105,7 +118,7 @@ export default function MainLayout() {
         });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/teams')) {
-        const response = await api.get('/teams');
+        const response = await api.get('/teams', { params: { partnerKey } });
         const mapped = response.data.map((t: {
           id: string; name: string; project: string; plate: string; position: [number, number];
           tenantId?: string; hasLiveLocation?: boolean; locationUpdatedAt?: string | null;
@@ -127,7 +140,7 @@ export default function MainLayout() {
         });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/map')) {
-        const response = await api.get('/stations');
+        const response = await api.get('/stations', { params: { partnerKey } });
         const mapped = response.data.map((s: {
           id: string; name: string; statusType: string; city: string; position: [number, number];
           ownerCompany?: string | null; tenantId?: string;
@@ -170,17 +183,13 @@ export default function MainLayout() {
       console.error('Harita verileri senkronize edilemedi:', error);
       setLiveMarkers([]);
     }
-  }, [location.pathname, activePartner.key]);
+  }, [location.pathname, partnerKey]);
 
   useEffect(() => {
-    let isMounted = true;
-    const run = async () => {
-      if (isMounted) await fetchMapData();
-    };
-    run();
-    return () => {
-      isMounted = false;
-    };
+    const timeoutId = window.setTimeout(() => {
+      void fetchMapData();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchMapData]);
 
   const handlePartnerSelect = (partner: PartnerOption) => {
@@ -236,7 +245,12 @@ export default function MainLayout() {
   const isSurveysPage = location.pathname.startsWith('/surveys');
 
   const showMapBackground = isWorkOrdersPage || isTeamsPage || isMapPage || isSurveysPage;
-  const showSlatPanel = isWorkOrdersPage || isTeamsPage || isMapPage || isSurveysPage;
+  const showSlatPanel = showMapBackground;
+
+  if (listPanelPath !== location.pathname) {
+    setListPanelPath(location.pathname);
+    setIsListPanelHidden(false);
+  }
 
   const filteredMarkers = liveMarkers.filter((m) => mapFilter === 'Tümü' || m.priority === mapFilter);
   const outletContextValue = {
@@ -245,7 +259,7 @@ export default function MainLayout() {
     setMapFilter,
     refreshMapData: fetchMapData,
     activePartner,
-    partnerKey: activePartner.key as PartnerKey,
+    partnerKey,
   };
 
   return (
@@ -332,6 +346,16 @@ export default function MainLayout() {
 
       <main className="flex-1 flex flex-col relative z-10 h-screen overflow-hidden">
         <header className="h-20 shrink-0 bg-white/90 backdrop-blur-sm border-b border-slate-200 flex items-center px-8 shadow-sm justify-end z-40 gap-4 relative">
+          {showMapBackground && (
+            <button
+              type="button"
+              onClick={() => setIsListPanelHidden((prev) => !prev)}
+              className="mr-auto text-sm font-bold px-4 py-2.5 rounded-lg transition shadow-sm border border-slate-200 bg-slate-50 text-brand-navy hover:bg-slate-100"
+              title={isListPanelHidden ? 'Listeyi göster' : 'Yalnızca haritayı göster'}
+            >
+              {isListPanelHidden ? '☰ Listeyi Göster' : '🗺 Yalnızca Harita'}
+            </button>
+          )}
           <div className="relative">
             <button
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
@@ -345,7 +369,7 @@ export default function MainLayout() {
               )}
             </button>
             {isNotificationOpen && (
-              <div className="absolute right-0 mt-2 w-96 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-[100] text-xs animate-fadeIn">
+              <div className="absolute right-0 mt-2 w-96 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-100 text-xs animate-fadeIn">
                 <div className="p-3 bg-slate-50 font-bold border-b border-slate-200 text-brand-navy flex justify-between items-center">
                   <span>Bildirimler</span>
                   <button
@@ -398,7 +422,13 @@ export default function MainLayout() {
               </div>
               {showSlatPanel && (
                 <div
-                  className={`absolute top-0 bottom-0 w-100 bg-white border-r border-slate-200 shadow-2xl z-20 overflow-hidden flex flex-col transition-all duration-300 ease-in-out ${isMenuOpen ? 'left-44' : 'left-0'}`}
+                  className={`absolute top-0 bottom-0 w-100 bg-white border-r border-slate-200 shadow-2xl z-20 overflow-hidden flex flex-col transition-[left,opacity] duration-300 ease-in-out ${
+                    isListPanelHidden
+                      ? '-left-100 opacity-0 pointer-events-none'
+                      : isMenuOpen
+                        ? 'left-44 opacity-100'
+                        : 'left-0 opacity-100'
+                  }`}
                 >
                   <div className="flex-1 overflow-y-auto">
                     <Outlet context={outletContextValue} />

@@ -442,14 +442,16 @@ export default function Timesheet() {
         )}
       </div>
 
-      {/* SAĞDAN KAYAN İŞ EMİR PLANLAMA ÇEKMECESİ */}
-      <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
-        <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50">
-          <div className="flex items-center gap-2"><span className="text-blue-600 font-bold">Takvim Planlama</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm">Hızlı İş Ekle</span></div>
-          <button type="button" onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
-        </div>
+      {/* İş emri planlama — merkez modal */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+              <div className="flex items-center gap-2"><span className="text-blue-600 font-bold">Takvim Planlama</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm">Hızlı İş Ekle</span></div>
+              <button type="button" onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
+            </div>
         
-        <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-12">
+            <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm">
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50" value={formData.workType} onChange={e => setFormData({...formData, workType: e.target.value})}>{lookups.types.map((t, idx) => <option key={idx}>{t}</option>)}</select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Kategorisi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50" value={formData.workCategory} onChange={e => setFormData({...formData, workCategory: e.target.value})}>{lookups.categories.map((c, idx) => <option key={idx}>{c}</option>)}</select></div>
           <div><label className="block text-xs font-bold text-slate-700 mb-1">İş Öncelik Tipi</label><select className="w-full border border-slate-300 rounded-lg p-2.5 bg-slate-50" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
@@ -519,8 +521,10 @@ export default function Timesheet() {
               )}
             </button>
           </div>
-        </form>
-      </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -47,6 +47,11 @@ export default function MapPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [stations, setStations] = useState<StationData[]>([]);
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
+  const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
+  const [workCategories, setWorkCategories] = useState<string[]>([
+    'Arıza Bildirimi', 'YG İşletme Sorumluluğu Talebi', 'YG Bakım', 'AG Bakım',
+    'Kapasitif Ceza', 'QR, Etiket ve Görsel Kontrol', 'Duba, Stopper ve Çevre Kontrol',
+  ]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isBulkOpen, setIsBulkOpen] = useState(false);
@@ -104,6 +109,12 @@ export default function MapPage() {
           ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
           : (backendData.personnel ?? []);
         setPersonnel(mapped);
+        if (Array.isArray(backendData.types) && backendData.types.length > 0) {
+          setWorkTypes(backendData.types);
+        }
+        if (Array.isArray(backendData.categories) && backendData.categories.length > 0) {
+          setWorkCategories(backendData.categories);
+        }
         if (mapped.length > 0) {
           setBulkForm((prev) => ({
             ...prev,
@@ -313,75 +324,98 @@ export default function MapPage() {
         )}
       </div>
 
-      {/* Nokta ekleme */}
-      <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isFormOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
-        <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-slate-50 shadow-sm shrink-0">
-          <span className="font-bold text-brand-navy text-sm">Yeni Nokta</span>
-          <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
-        </div>
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm pb-12">
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İstasyon Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option>Alt Yapı Tamamlandı</option><option>Enerji Bekliyor</option><option>Yayınlandı</option></select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option>ACDC</option><option>AC</option><option>DC</option></select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İlgili Personel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelName} onChange={e => setFormData({...formData, personnelName: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Personel Tel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelPhone} onChange={e => setFormData({...formData, personnelPhone: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.edas} onChange={e => setFormData({...formData, edas: e.target.value})}>{EDAS_LIST.map((e, i) => <option key={i}>{e}</option>)}</select></div>
-          <div className="flex gap-4"><div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Lat</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div><div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Lng</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Adres</label><textarea required rows={2} className="w-full border rounded-lg p-2.5" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">Nokta Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.pointType} onChange={e => setFormData({...formData, pointType: e.target.value})}><option>YG Abonelik</option><option>AG Abonelik</option><option>Süzme Sayaç</option></select></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">İl</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})}>{CITIES.map((c, i) => <option key={i}>{c}</option>)}</select></div>
-          <div className="flex justify-end gap-6 pt-4 border-t">
-            <button type="button" onClick={() => setIsFormOpen(false)} className="text-rose-500 font-bold">İptal</button>
-            <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-lg">{isSubmitting ? '...' : '✓ Kaydet'}</button>
+      {/* Nokta ekleme — merkez modal */}
+      {isFormOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+              <h2 className="text-base font-bold text-brand-navy">Yeni Nokta</h2>
+              <button type="button" onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
+            </div>
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar text-sm">
+              <div><label className="block text-xs font-bold text-slate-700 mb-1">İstasyon Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option>Alt Yapı Tamamlandı</option><option>Enerji Bekliyor</option><option>Yayınlandı</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option>ACDC</option><option>AC</option><option>DC</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">İlgili Personel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelName} onChange={e => setFormData({...formData, personnelName: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Personel Tel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelPhone} onChange={e => setFormData({...formData, personnelPhone: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.edas} onChange={e => setFormData({...formData, edas: e.target.value})}>{EDAS_LIST.map((e, i) => <option key={i}>{e}</option>)}</select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Nokta Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.pointType} onChange={e => setFormData({...formData, pointType: e.target.value})}><option>YG Abonelik</option><option>AG Abonelik</option><option>Süzme Sayaç</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-600 mb-1">Lat</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
+                <div><label className="block text-xs font-bold text-slate-600 mb-1">Lng</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
+              </div>
+              <div><label className="block text-xs font-bold text-slate-700 mb-1">Adres</label><textarea required rows={2} className="w-full border rounded-lg p-2.5" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+              <div><label className="block text-xs font-bold text-slate-700 mb-1">İl</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})}>{CITIES.map((c, i) => <option key={i}>{c}</option>)}</select></div>
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-600 hover:bg-slate-50">İptal</button>
+                <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-xl disabled:opacity-50">{isSubmitting ? '...' : '✓ Kaydet'}</button>
+              </div>
+            </form>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
 
-      {/* Toplu iş emri */}
-      <div className={`fixed top-20 right-0 bottom-0 bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.15)] border-l border-slate-200 transition-transform duration-300 z-40 flex flex-col ${isBulkOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ width: '450px' }}>
-        <div className="flex justify-between items-center p-4 border-b bg-emerald-50 shrink-0">
-          <div>
-            <p className="font-bold text-brand-navy text-sm">Toplu İş Emri</p>
-            <p className="text-[11px] text-emerald-700 font-semibold">{selectedIds.length} nokta seçili</p>
+      {/* Toplu iş emri — merkez modal */}
+      {isBulkOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b bg-emerald-50 shrink-0">
+              <div>
+                <h2 className="font-bold text-brand-navy text-base">Toplu İş Emri</h2>
+                <p className="text-[11px] text-emerald-700 font-semibold">{selectedIds.length} nokta seçili</p>
+              </div>
+              <button type="button" onClick={() => setIsBulkOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
+            </div>
+            <form onSubmit={handleBulkSubmit} className="flex-1 overflow-y-auto p-6 space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-xs font-bold mb-1">İş Tipi</label>
+                  <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={bulkForm.type} onChange={(e) => setBulkForm({ ...bulkForm, type: e.target.value })}>
+                    {workTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div><label className="block text-xs font-bold mb-1">İş Kategorisi</label>
+                  <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={bulkForm.category} onChange={(e) => setBulkForm({ ...bulkForm, category: e.target.value })}>
+                    {workCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div><label className="block text-xs font-bold mb-1">Öncelik</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.priority} onChange={(e) => setBulkForm({ ...bulkForm, priority: e.target.value })}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
+                <div />
+                <div><label className="block text-xs font-bold mb-1">Planlanan Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => setBulkForm({ ...bulkForm, startDate: e.target.value })} /></div>
+                <div><label className="block text-xs font-bold mb-1">Planlanan Bitiş</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.endDate} onChange={(e) => setBulkForm({ ...bulkForm, endDate: e.target.value })} /></div>
+              </div>
+              <div><label className="block text-xs font-bold mb-1">Genel Açıklama</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.description} onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })} /></div>
+              <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs">
+                  <input type="checkbox" checked={bulkForm.isPeriodic} onChange={(e) => setBulkForm({ ...bulkForm, isPeriodic: e.target.checked })} />
+                  Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)
+                </label>
+                {bulkForm.isPeriodic && (
+                  <select className="w-full border rounded-lg p-2 text-xs" value={bulkForm.recurrenceInterval} onChange={(e) => setBulkForm({ ...bulkForm, recurrenceInterval: e.target.value })}>
+                    <option value="Haftalik">Her Hafta</option>
+                    <option value="Aylik">Her Ay</option>
+                    <option value="Yillik">Her Yıl</option>
+                  </select>
+                )}
+              </div>
+              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
+                <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Atanan Sahacı *</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.assignedToUserId} onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-3 border-t">
+                <button type="button" onClick={() => setIsBulkOpen(false)} className="flex-1 border rounded-xl py-3 font-bold hover:bg-slate-50">İptal</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">
+                  {isSubmitting ? 'Oluşturuluyor...' : `${selectedIds.length} İş Emri Aç`}
+                </button>
+              </div>
+            </form>
           </div>
-          <button onClick={() => setIsBulkOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
         </div>
-        <form onSubmit={handleBulkSubmit} className="flex-1 overflow-y-auto p-5 space-y-3 text-sm pb-12">
-          <p className="text-[11px] text-slate-500">Başlıkta <code className="bg-slate-100 px-1 rounded">{'{nokta}'}</code> kullanırsanız her noktanın adı yazılır.</p>
-          <div><label className="block text-xs font-bold mb-1">Başlık şablonu</label><input required className="w-full border rounded-lg p-2.5" value={bulkForm.title} onChange={(e) => setBulkForm({ ...bulkForm, title: e.target.value })} /></div>
-          <div><label className="block text-xs font-bold mb-1">İş Tipi</label><input className="w-full border rounded-lg p-2.5" value={bulkForm.type} onChange={(e) => setBulkForm({ ...bulkForm, type: e.target.value })} /></div>
-          <div><label className="block text-xs font-bold mb-1">Kategori</label><input className="w-full border rounded-lg p-2.5" value={bulkForm.category} onChange={(e) => setBulkForm({ ...bulkForm, category: e.target.value })} /></div>
-          <div><label className="block text-xs font-bold mb-1">Öncelik</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.priority} onChange={(e) => setBulkForm({ ...bulkForm, priority: e.target.value })}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
-          <div className="flex gap-2">
-            <div className="flex-1"><label className="block text-xs font-bold mb-1">Planlanan Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => setBulkForm({ ...bulkForm, startDate: e.target.value })} /></div>
-            <div className="flex-1"><label className="block text-xs font-bold mb-1">Planlanan Bitiş</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.endDate} onChange={(e) => setBulkForm({ ...bulkForm, endDate: e.target.value })} /></div>
-          </div>
-          <div><label className="block text-xs font-bold mb-1">Genel Açıklama</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.description} onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })} /></div>
-          <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>
-          <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
-            <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs">
-              <input type="checkbox" checked={bulkForm.isPeriodic} onChange={(e) => setBulkForm({ ...bulkForm, isPeriodic: e.target.checked })} />
-              Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)
-            </label>
-            {bulkForm.isPeriodic && (
-              <select className="w-full border rounded-lg p-2 text-xs" value={bulkForm.recurrenceInterval} onChange={(e) => setBulkForm({ ...bulkForm, recurrenceInterval: e.target.value })}>
-                <option value="Haftalik">Her Hafta</option>
-                <option value="Aylik">Her Ay</option>
-                <option value="Yillik">Her Yıl</option>
-              </select>
-            )}
-          </div>
-          <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-          <div><label className="block text-xs font-bold mb-1">İş Açan</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-          <div><label className="block text-xs font-bold mb-1">İş Atanan Sahacı *</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.assignedToUserId} onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-          <div className="flex gap-3 pt-3 border-t">
-            <button type="button" onClick={() => setIsBulkOpen(false)} className="flex-1 border rounded-xl py-3 font-bold">İptal</button>
-            <button type="submit" disabled={isSubmitting} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">
-              {isSubmitting ? 'Oluşturuluyor...' : `${selectedIds.length} İş Emri Aç`}
-            </button>
-          </div>
-        </form>
-      </div>
+      )}
 
       {isDetailModalOpen && selectedStation && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -390,13 +424,75 @@ export default function MapPage() {
               <h2 className="text-base font-bold text-brand-navy">📍 İstasyon Detay</h2>
               <button onClick={() => setIsDetailModalOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl">×</button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-4 text-xs">
-              <div className="col-span-2 bg-blue-50 text-blue-800 px-4 py-2 rounded-lg font-bold text-sm">{selectedStation.name}</div>
-              <div><label className="block font-bold text-slate-400 mb-1">İl</label><input disabled className="w-full bg-slate-50 border rounded-lg p-2.5" value={selectedStation.city} /></div>
-              <div><label className="block font-bold text-slate-400 mb-1">Durum</label><input disabled className="w-full bg-slate-50 border rounded-lg p-2.5 text-emerald-600 font-bold" value={selectedStation.statusType} /></div>
-              <div className="col-span-2"><label className="block font-bold text-slate-400 mb-1">Adres</label><textarea disabled rows={2} className="w-full bg-slate-50 border rounded-lg p-2.5" value={selectedStation.address} /></div>
+            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-x-6 gap-y-4 text-xs">
+              <div className="col-span-2 bg-blue-50 text-blue-800 px-4 py-2 rounded-lg font-bold text-sm">{selectedStation.name || '—'}</div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İl</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.city || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İlçe</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.district || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Durum</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold text-emerald-600" value={selectedStation.statusType || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Güç Tipi</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.powerType || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Nokta Tipi</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.pointType || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">EDAŞ</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.edas || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Sahip / Firma</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.ownerCompany || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Personel</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.personnelName || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Personel Telefon</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.personnelPhone || '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Enlem)</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold text-slate-700" value={selectedStation.position?.[0] != null ? String(selectedStation.position[0]) : '—'} />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Boylam)</label>
+                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold text-slate-700" value={selectedStation.position?.[1] != null ? String(selectedStation.position[1]) : '—'} />
+              </div>
+              <div className="col-span-2">
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Adres</label>
+                <textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.address?.trim() || '—'} />
+              </div>
             </div>
-            <div className="px-6 py-4 border-t bg-slate-50 flex justify-end">
+            <div className="px-6 py-4 border-t bg-slate-50 flex justify-between gap-3">
+              <button
+                type="button"
+                className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700"
+                onClick={() => {
+                  if (!selectedStation) return;
+                  setSelectedIds([selectedStation.id]);
+                  setBulkForm((prev) => ({
+                    ...prev,
+                    title: `${selectedStation.name} iş emri`,
+                    address: selectedStation.address || '',
+                  }));
+                  setIsDetailModalOpen(false);
+                  setIsBulkOpen(true);
+                }}
+              >
+                + İş Emri Aç
+              </button>
               <button onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl">Kapat</button>
             </div>
           </div>
