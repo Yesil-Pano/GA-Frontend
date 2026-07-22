@@ -1,6 +1,7 @@
 // src/pages/MapPage.tsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
+import { Virtuoso } from 'react-virtuoso';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
@@ -33,6 +34,14 @@ interface PersonnelLookup {
   fullName: string;
 }
 
+interface MapPageOutletContext {
+  setFocusedMarkerPosition: (pos: [number, number] | null) => void;
+  refreshMapData?: () => Promise<void>;
+  partnerKey?: string;
+  mapStations?: StationData[];
+  isMapStationsLoading?: boolean;
+}
+
 const EDAS_LIST = ["VANGÖLÜ", "ULUDAĞ", "TIRAKYA", "TOROSLAR", "SAKARYA", "OSMANGAZİ", "MERAM", "KCTAŞ", "GDZ", "FIRAT", "DİCLE", "ÇORUH", "ÇAMLIBEL", "BOĞAZİÇİ", "BAŞKENT", "AYEDAŞ", "AKEDAŞ", "AKDENİZ", "ADM", "ARAS"];
 const CITIES = ["Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın","Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri","Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin","Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray","Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova","Karabük","Kilis","Osmaniye","Düzce"];
 
@@ -42,10 +51,74 @@ const todayLocal = (h: number, m = 0) => {
   return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}T${pad(h)}:${pad(m)}`;
 };
 
+const StationListCard = memo(function StationListCard({
+  station,
+  partnerKey,
+  selected,
+  onFocus,
+  onToggleSelect,
+  onOpenDetail,
+}: {
+  station: StationData;
+  partnerKey?: string;
+  selected: boolean;
+  onFocus: (position: [number, number]) => void;
+  onToggleSelect: (id: string) => void;
+  onOpenDetail: (station: StationData) => void;
+}) {
+  const pk = resolvePartnerKey({
+    tenantId: station.tenantId,
+    ownerCompany: station.ownerCompany,
+    name: station.name,
+  });
+  const partner = pk ? getPartnerByKey(pk) : null;
+  const accent = partnerKey === 'all' ? getPartnerColor(pk) : undefined;
+
+  return (
+    <div
+      onClick={() => station.position && onFocus([...station.position] as [number, number])}
+      className={`bg-white rounded-xl shadow-md border p-4 cursor-pointer hover:shadow-lg transition group flex gap-3 mb-3 ${selected ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200 border-l-[6px]'}`}
+      style={selected ? undefined : { borderLeftColor: accent || '#3B82F6' }}
+    >
+      <input
+        type="checkbox"
+        className="mt-1 accent-emerald-600 shrink-0"
+        checked={selected}
+        onChange={(e) => { e.stopPropagation(); onToggleSelect(station.id); }}
+        onClick={(e) => e.stopPropagation()}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <h3 className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">📍 {station.name}</h3>
+          {partnerKey === 'all' && partner && partner.key !== 'all' && (
+            <span
+              className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white"
+              style={{ backgroundColor: partner.color }}
+            >
+              {partner.name}
+            </span>
+          )}
+        </div>
+        <div className="space-y-1 text-xs text-slate-600 font-medium">
+          <div><span className="font-bold text-slate-400">İl:</span> {station.city}{station.district ? ` / ${station.district}` : ''} | <span className="font-bold text-slate-400">Güç:</span> {station.powerType}</div>
+          <div><span className="font-bold text-slate-400">Durum:</span> <span className="text-emerald-600 font-bold">{station.statusType}</span></div>
+        </div>
+        <div className="flex justify-end mt-3 pt-2 border-t border-slate-100">
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenDetail(station); }}
+            className="text-xs text-blue-600 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold"
+          >
+            🔎 Detayları Gör
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function MapPage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
-  const [stations, setStations] = useState<StationData[]>([]);
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
   const [workCategories, setWorkCategories] = useState<string[]>([
@@ -56,9 +129,112 @@ export default function MapPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [lookupsLoaded, setLookupsLoaded] = useState(false);
+  const [lookupsLoading, setLookupsLoading] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedStation, setSelectedStation] = useState<StationData | null>(null);
+  const [isEditingDetail, setIsEditingDetail] = useState(false);
+  const [isSavingDetail, setIsSavingDetail] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    city: 'Ankara',
+    district: '',
+    statusType: 'Alt Yapı Tamamlandı',
+    powerType: '-',
+    pointType: 'YG Abonelik',
+    edas: '-',
+    ownerCompany: '',
+    personnelName: '-',
+    personnelPhone: '-',
+    address: '-',
+    lat: 39.92,
+    lng: 32.85,
+  });
+
+  const { setFocusedMarkerPosition, refreshMapData, partnerKey, mapStations, isMapStationsLoading } =
+    useOutletContext<MapPageOutletContext>();
+
+  const stations = useMemo(
+    () => (Array.isArray(mapStations) ? mapStations : []) as StationData[],
+    [mapStations],
+  );
+  const isLoading = Boolean(isMapStationsLoading);
+
+  const openStationDetail = useCallback((station: StationData) => {
+    setSelectedStation(station);
+    setIsEditingDetail(false);
+    setEditForm({
+      name: station.name || '',
+      city: station.city || 'Ankara',
+      district: station.district || '',
+      statusType: station.statusType || 'Alt Yapı Tamamlandı',
+      powerType: station.powerType || '-',
+      pointType: station.pointType || 'YG Abonelik',
+      edas: station.edas || '-',
+      ownerCompany: station.ownerCompany || '',
+      personnelName: station.personnelName || '-',
+      personnelPhone: station.personnelPhone || '-',
+      address: station.address || '-',
+      lat: station.position?.[0] ?? 39.92,
+      lng: station.position?.[1] ?? 32.85,
+    });
+    setIsDetailModalOpen(true);
+  }, []);
+
+  const closeStationDetail = () => {
+    setIsDetailModalOpen(false);
+    setIsEditingDetail(false);
+    setSelectedStation(null);
+  };
+
+  const handleSaveStationDetail = async () => {
+    if (!selectedStation) return;
+    if (!editForm.name.trim()) {
+      alert('İstasyon adı zorunludur.');
+      return;
+    }
+    setIsSavingDetail(true);
+    try {
+      const { data } = await api.put(`/stations/${selectedStation.id}`, {
+        name: editForm.name.trim(),
+        city: editForm.city,
+        district: editForm.district.trim() || null,
+        statusType: editForm.statusType,
+        powerType: editForm.powerType,
+        pointType: editForm.pointType,
+        edas: editForm.edas,
+        ownerCompany: editForm.ownerCompany.trim() || null,
+        personnelName: editForm.personnelName,
+        personnelPhone: editForm.personnelPhone,
+        address: editForm.address,
+        latitude: Number(editForm.lat),
+        longitude: Number(editForm.lng),
+      });
+      const updated: StationData = {
+        ...selectedStation,
+        name: data.name,
+        city: data.city,
+        district: data.district,
+        statusType: data.statusType,
+        powerType: data.powerType,
+        pointType: data.pointType,
+        edas: data.edas,
+        ownerCompany: data.ownerCompany,
+        personnelName: data.personnelName,
+        personnelPhone: data.personnelPhone,
+        address: data.address,
+        position: data.position,
+      };
+      setSelectedStation(updated);
+      setIsEditingDetail(false);
+      await refreshMapData?.();
+    } catch (error) {
+      console.error(error);
+      alert('İstasyon güncellenemedi.');
+    } finally {
+      setIsSavingDetail(false);
+    }
+  };
 
   const [formData, setFormData] = useState({
     name: '', statusType: 'Alt Yapı Tamamlandı', powerType: 'AC', personnelName: '', personnelPhone: '',
@@ -82,56 +258,48 @@ export default function MapPage() {
     recurrenceInterval: 'Haftalik',
   });
 
-  const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
-    setFocusedMarkerPosition: (pos: [number, number] | null) => void;
-    refreshMapData?: () => Promise<void>;
-    partnerKey?: string;
-  }>();
-
-  const fetchStations = async () => {
-    const response = await api.get('/stations');
-    setStations(response.data);
-  };
-
+  // Partner değişince lookups yeniden alınsın (toplu iş emri personeli güncel kalsın)
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setIsLoading(true);
+    setLookupsLoaded(false);
+    setPersonnel([]);
+  }, [partnerKey]);
+
+  // Lookups yalnızca toplu iş emri modalı açılınca — listeyi bloklamaz
+  useEffect(() => {
+    if (!isBulkOpen || lookupsLoaded) return;
+    let cancelled = false;
+    setLookupsLoading(true);
+    (async () => {
       try {
-        const [stationsRes, lookupsRes] = await Promise.all([
-          api.get('/stations'),
-          api.get('/workorders/lookups'),
-        ]);
-        if (!mounted) return;
-        setStations(stationsRes.data);
-        const backendData = lookupsRes.data || {};
-        const mapped = backendData.teams
+        const { data: backendData } = await api.get('/workorders/lookups');
+        if (cancelled) return;
+        const mapped = backendData?.teams
           ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
-          : (backendData.personnel ?? []);
+          : (backendData?.personnel ?? []);
         setPersonnel(mapped);
-        if (Array.isArray(backendData.types) && backendData.types.length > 0) {
+        if (Array.isArray(backendData?.types) && backendData.types.length > 0) {
           setWorkTypes(backendData.types);
         }
-        if (Array.isArray(backendData.categories) && backendData.categories.length > 0) {
+        if (Array.isArray(backendData?.categories) && backendData.categories.length > 0) {
           setWorkCategories(backendData.categories);
         }
         if (mapped.length > 0) {
           setBulkForm((prev) => ({
             ...prev,
-            operationUserId: mapped[0].id,
-            openedByUserId: mapped[0].id,
-            assignedToUserId: mapped[0].id,
+            operationUserId: prev.operationUserId || mapped[0].id,
+            openedByUserId: prev.openedByUserId || mapped[0].id,
+            assignedToUserId: prev.assignedToUserId || mapped[0].id,
           }));
         }
+        setLookupsLoaded(true);
       } catch (e) {
         console.error(e);
       } finally {
-        if (mounted) setIsLoading(false);
+        if (!cancelled) setLookupsLoading(false);
       }
-    };
-    load();
-    return () => { mounted = false; };
-  }, [partnerKey]);
+    })();
+    return () => { cancelled = true; };
+  }, [isBulkOpen, lookupsLoaded, partnerKey]);
 
   const filteredStations = useMemo(
     () =>
@@ -145,12 +313,18 @@ export default function MapPage() {
     [stations, searchTerm],
   );
 
-  const allFilteredSelected =
-    filteredStations.length > 0 && filteredStations.every((s) => selectedIds.includes(s.id));
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
-  const toggleSelect = (id: string) => {
+  const allFilteredSelected =
+    filteredStations.length > 0 && filteredStations.every((s) => selectedIdSet.has(s.id));
+
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
+  }, []);
+
+  const handleFocusStation = useCallback((position: [number, number]) => {
+    setFocusedMarkerPosition(position);
+  }, [setFocusedMarkerPosition]);
 
   const toggleSelectAllFiltered = () => {
     if (allFilteredSelected) {
@@ -171,7 +345,6 @@ export default function MapPage() {
         ...formData, latitude: Number(formData.lat), longitude: Number(formData.lng)
       });
       setIsFormOpen(false);
-      await fetchStations();
       await refreshMapData?.();
     } catch (error) {
       console.error(error);
@@ -224,7 +397,7 @@ export default function MapPage() {
 
   return (
     <div className="h-full flex flex-col p-4 bg-white relative overflow-hidden">
-      <div className="mb-4 space-y-3">
+      <div className="mb-4 space-y-3 shrink-0">
         <div className="relative">
           <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
           <input
@@ -259,7 +432,7 @@ export default function MapPage() {
         </div>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto pr-2 custom-scrollbar pb-4">
+      <div className="flex-1 min-h-0 pr-1">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center pt-20 space-y-3">
             <svg className="animate-spin h-8 w-7 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -271,56 +444,21 @@ export default function MapPage() {
         ) : filteredStations.length === 0 ? (
           <p className="text-sm text-slate-400 text-center mt-10">Kayıtlı saha noktası bulunmuyor.</p>
         ) : (
-          filteredStations.map((station) => {
-            const pk = resolvePartnerKey({
-              tenantId: station.tenantId,
-              ownerCompany: station.ownerCompany,
-              name: station.name,
-            });
-            const partner = pk ? getPartnerByKey(pk) : null;
-            const accent = partnerKey === 'all' ? getPartnerColor(pk) : undefined;
-            return (
-            <div
-              key={station.id}
-              onClick={() => station.position && setFocusedMarkerPosition([...station.position])}
-              className={`bg-white rounded-xl shadow-md border p-4 cursor-pointer hover:shadow-lg transition group flex gap-3 ${selectedIds.includes(station.id) ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200 border-l-[6px]'}`}
-              style={selectedIds.includes(station.id) ? undefined : { borderLeftColor: accent || '#3B82F6' }}
-            >
-              <input
-                type="checkbox"
-                className="mt-1 accent-emerald-600 shrink-0"
-                checked={selectedIds.includes(station.id)}
-                onChange={(e) => { e.stopPropagation(); toggleSelect(station.id); }}
-                onClick={(e) => e.stopPropagation()}
+          <Virtuoso
+            style={{ height: '100%' }}
+            data={filteredStations}
+            overscan={200}
+            itemContent={(_index, station) => (
+              <StationListCard
+                station={station}
+                partnerKey={partnerKey}
+                selected={selectedIdSet.has(station.id)}
+                onFocus={handleFocusStation}
+                onToggleSelect={toggleSelect}
+                onOpenDetail={openStationDetail}
               />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">📍 {station.name}</h3>
-                  {partnerKey === 'all' && partner && partner.key !== 'all' && (
-                    <span
-                      className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white"
-                      style={{ backgroundColor: partner.color }}
-                    >
-                      {partner.name}
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-1 text-xs text-slate-600 font-medium">
-                  <div><span className="font-bold text-slate-400">İl:</span> {station.city}{station.district ? ` / ${station.district}` : ''} | <span className="font-bold text-slate-400">Güç:</span> {station.powerType}</div>
-                  <div><span className="font-bold text-slate-400">Durum:</span> <span className="text-emerald-600 font-bold">{station.statusType}</span></div>
-                </div>
-                <div className="flex justify-end mt-3 pt-2 border-t border-slate-100">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setSelectedStation(station); setIsDetailModalOpen(true); }}
-                    className="text-xs text-blue-600 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold"
-                  >
-                    🔎 Detayları Gör
-                  </button>
-                </div>
-              </div>
-            </div>
-            );
-          })
+            )}
+          />
         )}
       </div>
 
@@ -367,6 +505,9 @@ export default function MapPage() {
               <button type="button" onClick={() => setIsBulkOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
             </div>
             <form onSubmit={handleBulkSubmit} className="flex-1 overflow-y-auto p-6 space-y-3 text-sm">
+              {lookupsLoading && !lookupsLoaded && (
+                <p className="text-xs text-slate-500 font-semibold animate-pulse">Personel listesi yükleniyor...</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold mb-1">İş Tipi</label>
                   <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={bulkForm.type} onChange={(e) => setBulkForm({ ...bulkForm, type: e.target.value })}>
@@ -401,14 +542,14 @@ export default function MapPage() {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Atanan Sahacı *</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.assignedToUserId} onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Atanan Sahacı *</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.assignedToUserId} onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
                 </div>
               </div>
               <div className="flex gap-3 pt-3 border-t">
                 <button type="button" onClick={() => setIsBulkOpen(false)} className="flex-1 border rounded-xl py-3 font-bold hover:bg-slate-50">İptal</button>
-                <button type="submit" disabled={isSubmitting} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">
+                <button type="submit" disabled={isSubmitting || (lookupsLoading && !lookupsLoaded)} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">
                   {isSubmitting ? 'Oluşturuluyor...' : `${selectedIds.length} İş Emri Aç`}
                 </button>
               </div>
@@ -421,64 +562,158 @@ export default function MapPage() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b bg-slate-50">
-              <h2 className="text-base font-bold text-brand-navy">📍 İstasyon Detay</h2>
-              <button onClick={() => setIsDetailModalOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl">×</button>
+              <h2 className="text-base font-bold text-brand-navy">
+                📍 İstasyon Detay {isEditingDetail ? '› Düzenleme Modu' : ''}
+              </h2>
+              <button onClick={closeStationDetail} className="text-slate-400 hover:text-rose-600 font-bold text-2xl">×</button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-x-6 gap-y-4 text-xs">
-              <div className="col-span-2 bg-blue-50 text-blue-800 px-4 py-2 rounded-lg font-bold text-sm">{selectedStation.name || '—'}</div>
+              <div className="col-span-2">
+                {isEditingDetail ? (
+                  <input
+                    className="w-full bg-white border border-blue-300 rounded-lg px-4 py-2 font-bold text-sm text-blue-800 focus:ring-2 focus:ring-blue-400 outline-none"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  />
+                ) : (
+                  <div className="bg-blue-50 text-blue-800 px-4 py-2 rounded-lg font-bold text-sm">{selectedStation.name || '—'}</div>
+                )}
+              </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İl</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.city || '—'} />
+                {isEditingDetail ? (
+                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}>
+                    {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.city || '—'} />
+                )}
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">İlçe</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.district || '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.district : (selectedStation.district || '—')}
+                  onChange={(e) => setEditForm({ ...editForm, district: e.target.value })}
+                  placeholder="İlçe"
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Durum</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold text-emerald-600" value={selectedStation.statusType || '—'} />
+                {isEditingDetail ? (
+                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-bold text-emerald-700" value={editForm.statusType} onChange={(e) => setEditForm({ ...editForm, statusType: e.target.value })}>
+                    <option>Alt Yapı Tamamlandı</option>
+                    <option>Enerji Bekliyor</option>
+                    <option>Yayınlandı</option>
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold text-emerald-600" value={selectedStation.statusType || '—'} />
+                )}
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Güç Tipi</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.powerType || '—'} />
+                {isEditingDetail ? (
+                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold" value={editForm.powerType} onChange={(e) => setEditForm({ ...editForm, powerType: e.target.value })}>
+                    <option value="-">-</option>
+                    <option>AC</option>
+                    <option>DC</option>
+                    <option>ACDC</option>
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.powerType || '—'} />
+                )}
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Nokta Tipi</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.pointType || '—'} />
+                {isEditingDetail ? (
+                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold" value={editForm.pointType} onChange={(e) => setEditForm({ ...editForm, pointType: e.target.value })}>
+                    <option>KOMPANZASYON</option>
+                    <option>ABONELER</option>
+                    <option>YG Abonelik</option>
+                    <option>AG Abonelik</option>
+                    <option>Süzme Sayaç</option>
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.pointType || '—'} />
+                )}
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">EDAŞ</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.edas || '—'} />
+                {isEditingDetail ? (
+                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold" value={editForm.edas} onChange={(e) => setEditForm({ ...editForm, edas: e.target.value })}>
+                    <option value="-">-</option>
+                    {EDAS_LIST.map((e) => <option key={e} value={e}>{e}</option>)}
+                  </select>
+                ) : (
+                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.edas || '—'} />
+                )}
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Sahip / Firma</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.ownerCompany || '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.ownerCompany : (selectedStation.ownerCompany || '—')}
+                  onChange={(e) => setEditForm({ ...editForm, ownerCompany: e.target.value })}
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Personel</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.personnelName || '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.personnelName : (selectedStation.personnelName || '—')}
+                  onChange={(e) => setEditForm({ ...editForm, personnelName: e.target.value })}
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Personel Telefon</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.personnelPhone || '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  className={`w-full border rounded-lg p-2.5 font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.personnelPhone : (selectedStation.personnelPhone || '—')}
+                  onChange={(e) => setEditForm({ ...editForm, personnelPhone: e.target.value })}
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Enlem)</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold text-slate-700" value={selectedStation.position?.[0] != null ? String(selectedStation.position[0]) : '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  type={isEditingDetail ? 'number' : 'text'}
+                  step="any"
+                  className={`w-full border rounded-lg p-2.5 font-mono font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.lat : (selectedStation.position?.[0] != null ? String(selectedStation.position[0]) : '—')}
+                  onChange={(e) => setEditForm({ ...editForm, lat: parseFloat(e.target.value) })}
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Koordinat (Boylam)</label>
-                <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold text-slate-700" value={selectedStation.position?.[1] != null ? String(selectedStation.position[1]) : '—'} />
+                <input
+                  disabled={!isEditingDetail}
+                  type={isEditingDetail ? 'number' : 'text'}
+                  step="any"
+                  className={`w-full border rounded-lg p-2.5 font-mono font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.lng : (selectedStation.position?.[1] != null ? String(selectedStation.position[1]) : '—')}
+                  onChange={(e) => setEditForm({ ...editForm, lng: parseFloat(e.target.value) })}
+                />
               </div>
               <div className="col-span-2">
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Adres</label>
-                <textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.address?.trim() || '—'} />
+                <textarea
+                  disabled={!isEditingDetail}
+                  rows={2}
+                  className={`w-full border rounded-lg p-2.5 font-semibold ${isEditingDetail ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  value={isEditingDetail ? editForm.address : (selectedStation.address?.trim() || '—')}
+                  onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                />
               </div>
             </div>
             <div className="px-6 py-4 border-t bg-slate-50 flex justify-between gap-3">
               <button
                 type="button"
-                className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700"
+                disabled={isEditingDetail}
+                className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 disabled:opacity-40"
                 onClick={() => {
                   if (!selectedStation) return;
                   setSelectedIds([selectedStation.id]);
@@ -487,13 +722,61 @@ export default function MapPage() {
                     title: `${selectedStation.name} iş emri`,
                     address: selectedStation.address || '',
                   }));
-                  setIsDetailModalOpen(false);
+                  closeStationDetail();
                   setIsBulkOpen(true);
                 }}
               >
                 + İş Emri Aç
               </button>
-              <button onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl">Kapat</button>
+              <div className="flex gap-2">
+                {isEditingDetail ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingDetail(false);
+                        setEditForm({
+                          name: selectedStation.name || '',
+                          city: selectedStation.city || 'Ankara',
+                          district: selectedStation.district || '',
+                          statusType: selectedStation.statusType || 'Alt Yapı Tamamlandı',
+                          powerType: selectedStation.powerType || '-',
+                          pointType: selectedStation.pointType || 'YG Abonelik',
+                          edas: selectedStation.edas || '-',
+                          ownerCompany: selectedStation.ownerCompany || '',
+                          personnelName: selectedStation.personnelName || '-',
+                          personnelPhone: selectedStation.personnelPhone || '-',
+                          address: selectedStation.address || '-',
+                          lat: selectedStation.position?.[0] ?? 39.92,
+                          lng: selectedStation.position?.[1] ?? 32.85,
+                        });
+                      }}
+                      className="bg-white border border-slate-300 text-slate-700 font-bold px-5 py-2 rounded-xl hover:bg-slate-50"
+                    >
+                      Vazgeç
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveStationDetail}
+                      disabled={isSavingDetail}
+                      className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {isSavingDetail ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDetail(true)}
+                      className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700"
+                    >
+                      ✏️ Düzenle
+                    </button>
+                    <button onClick={closeStationDetail} className="bg-slate-700 text-white font-bold px-6 py-2 rounded-xl">Kapat</button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

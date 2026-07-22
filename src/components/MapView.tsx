@@ -21,21 +21,41 @@ export interface MapMarker {
   partnerName?: string;
 }
 
+/** Türkiye geneli — MainLayout ile aynı varsayılan */
+export const DEFAULT_MAP_CENTER: [number, number] = [37.420, 31.848];
+const DEFAULT_MAP_ZOOM = 6;
+const FOCUS_ZOOM = 14;
+
 interface MapViewProps {
   markers: MapMarker[];
-  center: [number, number];
+  center?: [number, number];
   focusedMarkerPosition: [number, number] | null;
+  /** Sayfa (route) değişince — haritayı varsayılan lat/lng + zoom'a çeker */
+  viewResetKey?: string;
 }
 
 type PartnerAwareMarker = L.Marker & { __partnerColor?: string };
 
-function MapController({ focusedPosition }: { focusedPosition: [number, number] | null }) {
+function MapController({
+  focusedPosition,
+  viewResetKey,
+}: {
+  focusedPosition: [number, number] | null;
+  viewResetKey?: string;
+}) {
   const map = useMap();
+
+  useEffect(() => {
+    if (viewResetKey == null) return;
+    map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, { animate: false });
+  }, [viewResetKey, map]);
+
   useEffect(() => {
     if (focusedPosition) {
-      map.flyTo(focusedPosition, 14, { duration: 1.5 });
+      map.flyTo(focusedPosition, FOCUS_ZOOM, { duration: 1.5 });
     }
   }, [focusedPosition, map]);
+
   return null;
 }
 
@@ -122,11 +142,16 @@ function MarkerClusterGroup({ markers }: { markers: MapMarker[] }) {
   return null;
 }
 
-export default function MapView({ markers, center, focusedMarkerPosition }: MapViewProps) {
+export default function MapView({
+  markers,
+  center = DEFAULT_MAP_CENTER,
+  focusedMarkerPosition,
+  viewResetKey,
+}: MapViewProps) {
   return (
     <MapContainer
       center={center}
-      zoom={6}
+      zoom={DEFAULT_MAP_ZOOM}
       style={{ height: '100%', width: '100%' }}
       zoomControl={false}
     >
@@ -137,7 +162,10 @@ export default function MapView({ markers, center, focusedMarkerPosition }: MapV
 
       <MarkerClusterGroup markers={markers} />
 
-      <MapController focusedPosition={focusedMarkerPosition} />
+      <MapController
+        focusedPosition={focusedMarkerPosition}
+        viewResetKey={viewResetKey}
+      />
     </MapContainer>
   );
 }

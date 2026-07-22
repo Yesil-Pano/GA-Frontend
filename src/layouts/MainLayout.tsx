@@ -1,11 +1,12 @@
 // ga-frontend/src/layouts/MainLayout.tsx
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
-import MapView from '../components/MapView';
+import MapView, { DEFAULT_MAP_CENTER } from '../components/MapView';
 import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
+import trugoLogoImg from '../assets/trugo-logo.png';
 import {
   SUPER_ADMIN_PARTNERS,
   getPartnerByKey,
@@ -45,6 +46,11 @@ export default function MainLayout() {
   const [focusedMarkerPosition, setFocusedMarkerPosition] = useState<[number, number] | null>(null);
   const [mapFilter, setMapFilter] = useState('Tümü');
   const [liveMarkers, setLiveMarkers] = useState<MapMarker[]>([]);
+  /** /map sayfası sol listesi — harita ile aynı GET /stations yanıtı (çift fetch yok) */
+  const [mapStations, setMapStations] = useState<unknown[]>([]);
+  const [isMapStationsLoading, setIsMapStationsLoading] = useState(() =>
+    location.pathname.startsWith('/map'),
+  );
 
   const [isPartnerDropdownOpen, setIsPartnerDropdownOpen] = useState(false);
   const [activePartner, setActivePartner] = useState<PartnerOption>(() =>
@@ -140,30 +146,39 @@ export default function MainLayout() {
         });
         setLiveMarkers(mapped);
       } else if (location.pathname.startsWith('/map')) {
-        const response = await api.get('/stations', { params: { partnerKey } });
-        const mapped = response.data.map((s: {
-          id: string; name: string; statusType: string; city: string; position: [number, number];
-          ownerCompany?: string | null; tenantId?: string;
-        }) => {
-          const pk = resolvePartnerKey({
-            tenantId: s.tenantId,
-            ownerCompany: s.ownerCompany,
-            name: s.name,
+        setIsMapStationsLoading(true);
+        try {
+          const response = await api.get('/stations', { params: { partnerKey } });
+          const stations = Array.isArray(response.data) ? response.data : [];
+          setMapStations(stations);
+          const mapped = stations.map((s: {
+            id: string; name: string; statusType: string; city: string; position: [number, number];
+            ownerCompany?: string | null; tenantId?: string;
+          }) => {
+            const pk = resolvePartnerKey({
+              tenantId: s.tenantId,
+              ownerCompany: s.ownerCompany,
+              name: s.name,
+            });
+            const partner = pk ? getPartnerByKey(pk) : null;
+            return {
+              id: s.id,
+              title: s.name,
+              subtitle: `${s.city} - ${s.statusType}`,
+              position: s.position,
+              priority: 'Orta',
+              type: 'Nokta' as const,
+              partnerColor: getPartnerColor(pk),
+              partnerName: partner && partner.key !== 'all' ? partner.name : undefined,
+            };
           });
-          const partner = pk ? getPartnerByKey(pk) : null;
-          return {
-            id: s.id,
-            title: s.name,
-            subtitle: `${s.city} - ${s.statusType}`,
-            position: s.position,
-            priority: 'Orta',
-            type: 'Nokta' as const,
-            partnerColor: getPartnerColor(pk),
-            partnerName: partner && partner.key !== 'all' ? partner.name : undefined,
-          };
-        });
-        setLiveMarkers(mapped);
+          setLiveMarkers(mapped);
+        } finally {
+          setIsMapStationsLoading(false);
+        }
       } else if (location.pathname.startsWith('/surveys')) {
+        setMapStations([]);
+        setIsMapStationsLoading(false);
         const response = await api.get('/surveys');
         const mapped = response.data.map((su: {
           id: string; status: string; description: string; latitude: number; longitude: number;
@@ -177,11 +192,15 @@ export default function MainLayout() {
         }));
         setLiveMarkers(mapped);
       } else {
+        setMapStations([]);
+        setIsMapStationsLoading(false);
         setLiveMarkers([]);
       }
     } catch (error) {
       console.error('Harita verileri senkronize edilemedi:', error);
       setLiveMarkers([]);
+      setMapStations([]);
+      setIsMapStationsLoading(false);
     }
   }, [location.pathname, partnerKey]);
 
@@ -191,6 +210,11 @@ export default function MainLayout() {
     }, 0);
     return () => window.clearTimeout(timeoutId);
   }, [fetchMapData]);
+
+  // Sayfa değişince önceki nokta odağını temizle — harita varsayılan lat/lng + zoom'a döner
+  useEffect(() => {
+    setFocusedMarkerPosition(null);
+  }, [location.pathname]);
 
   const handlePartnerSelect = (partner: PartnerOption) => {
     setActivePartner(partner);
@@ -260,6 +284,8 @@ export default function MainLayout() {
     refreshMapData: fetchMapData,
     activePartner,
     partnerKey,
+    mapStations,
+    isMapStationsLoading,
   };
 
   return (
@@ -356,6 +382,15 @@ export default function MainLayout() {
               {isListPanelHidden ? '☰ Listeyi Göster' : '🗺 Yalnızca Harita'}
             </button>
           )}
+          {partnerKey === 'trugo' && (
+            <img
+              src={trugoLogoImg}
+              alt="Trugo"
+              title="Trugo Şarj İstasyonları"
+              className="h-12 w-auto max-w-[220px] object-contain select-none"
+              draggable={false}
+            />
+          )}
           <div className="relative">
             <button
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
@@ -418,7 +453,12 @@ export default function MainLayout() {
           {showMapBackground ? (
             <>
               <div className="absolute inset-0 z-0">
-                <MapView markers={filteredMarkers} center={[37.420, 31.848]} focusedMarkerPosition={focusedMarkerPosition} />
+                <MapView
+                  markers={filteredMarkers}
+                  center={DEFAULT_MAP_CENTER}
+                  focusedMarkerPosition={focusedMarkerPosition}
+                  viewResetKey={location.pathname}
+                />
               </div>
               {showSlatPanel && (
                 <div
