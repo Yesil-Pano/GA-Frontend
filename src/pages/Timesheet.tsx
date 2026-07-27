@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import ModalOverlay from '../components/ModalOverlay';
 
 // --- GÜÇLÜ TİP SÖZLEŞMELERİ (INTERFACE) ---
 interface CalendarWorkOrder {
@@ -444,7 +445,7 @@ export default function Timesheet() {
 
       {/* İş emri planlama — merkez modal */}
       {isDrawerOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <div className="flex items-center gap-2"><span className="text-blue-600 font-bold">Takvim Planlama</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm">Hızlı İş Ekle</span></div>
@@ -523,7 +524,7 @@ export default function Timesheet() {
           </div>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
     </div>

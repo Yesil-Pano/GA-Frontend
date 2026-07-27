@@ -1,6 +1,7 @@
 // ga-frontend/src/pages/Users.tsx
 
 import { useState } from 'react';
+import ModalOverlay from '../components/ModalOverlay';
 
 const INITIAL_USERS = [
   { id: 'USR-001', name: 'Ahmet Yılmaz', role: 'Saha Ekibi', email: 'ahmet@gasys.com', status: 'Aktif' },
@@ -84,7 +85,7 @@ export default function Users() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 backdrop-blur-sm">
+        <ModalOverlay>
           <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md">
             <h2 className="text-xl font-bold text-slate-800 mb-4">Yeni Kullanıcı Ekle</h2>
             
@@ -140,7 +141,7 @@ export default function Users() {
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

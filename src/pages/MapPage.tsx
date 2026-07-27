@@ -5,6 +5,7 @@ import { Virtuoso } from 'react-virtuoso';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
+import ModalOverlay from '../components/ModalOverlay';
 
 interface StationData {
   id: string;
@@ -101,7 +102,7 @@ const StationListCard = memo(function StationListCard({
         </div>
         <div className="space-y-1 text-xs text-slate-600 font-medium">
           <div><span className="font-bold text-slate-400">İl:</span> {station.city}{station.district ? ` / ${station.district}` : ''} | <span className="font-bold text-slate-400">Güç:</span> {station.powerType}</div>
-          <div><span className="font-bold text-slate-400">Durum:</span> <span className="text-emerald-600 font-bold">{station.statusType}</span></div>
+                  <div><span className="font-bold text-slate-400">Durum:</span> <span className={`font-bold ${station.statusType === 'Bakım Dışı' ? 'text-rose-600' : 'text-emerald-600'}`}>{station.statusType}</span></div>
         </div>
         <div className="flex justify-end mt-3 pt-2 border-t border-slate-100">
           <button
@@ -139,7 +140,7 @@ export default function MapPage() {
     name: '',
     city: 'Ankara',
     district: '',
-    statusType: 'Alt Yapı Tamamlandı',
+    statusType: 'Bakıma Dahil',
     powerType: '-',
     pointType: 'YG Abonelik',
     edas: '-',
@@ -167,7 +168,7 @@ export default function MapPage() {
       name: station.name || '',
       city: station.city || 'Ankara',
       district: station.district || '',
-      statusType: station.statusType || 'Alt Yapı Tamamlandı',
+      statusType: station.statusType || 'Bakıma Dahil',
       powerType: station.powerType || '-',
       pointType: station.pointType || 'YG Abonelik',
       edas: station.edas || '-',
@@ -237,7 +238,7 @@ export default function MapPage() {
   };
 
   const [formData, setFormData] = useState({
-    name: '', statusType: 'Alt Yapı Tamamlandı', powerType: 'AC', personnelName: '', personnelPhone: '',
+    name: '', statusType: 'Bakıma Dahil', powerType: 'AC', personnelName: '', personnelPhone: '',
     edas: EDAS_LIST[0], address: '', pointType: 'YG Abonelik', city: 'Ankara', lat: 39.92, lng: 32.85
   });
 
@@ -464,7 +465,7 @@ export default function MapPage() {
 
       {/* Nokta ekleme — merkez modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <h2 className="text-base font-bold text-brand-navy">Yeni Nokta</h2>
@@ -473,7 +474,7 @@ export default function MapPage() {
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar text-sm">
               <div><label className="block text-xs font-bold text-slate-700 mb-1">İstasyon Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option>Alt Yapı Tamamlandı</option><option>Enerji Bekliyor</option><option>Yayınlandı</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option>Bakıma Dahil</option><option>Bakım Dışı</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option>ACDC</option><option>AC</option><option>DC</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">İlgili Personel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelName} onChange={e => setFormData({...formData, personnelName: e.target.value})} /></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Personel Tel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelPhone} onChange={e => setFormData({...formData, personnelPhone: e.target.value})} /></div>
@@ -490,12 +491,12 @@ export default function MapPage() {
               </div>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Toplu iş emri — merkez modal */}
       {isBulkOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b bg-emerald-50 shrink-0">
               <div>
@@ -555,11 +556,11 @@ export default function MapPage() {
               </div>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {isDetailModalOpen && selectedStation && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b bg-slate-50">
               <h2 className="text-base font-bold text-brand-navy">
@@ -603,12 +604,11 @@ export default function MapPage() {
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Durum</label>
                 {isEditingDetail ? (
                   <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-bold text-emerald-700" value={editForm.statusType} onChange={(e) => setEditForm({ ...editForm, statusType: e.target.value })}>
-                    <option>Alt Yapı Tamamlandı</option>
-                    <option>Enerji Bekliyor</option>
-                    <option>Yayınlandı</option>
+                    <option>Bakıma Dahil</option>
+                    <option>Bakım Dışı</option>
                   </select>
                 ) : (
-                  <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold text-emerald-600" value={selectedStation.statusType || '—'} />
+                  <input disabled className={`w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold ${selectedStation.statusType === 'Bakım Dışı' ? 'text-rose-600' : 'text-emerald-600'}`} value={selectedStation.statusType || '—'} />
                 )}
               </div>
               <div>
@@ -739,7 +739,7 @@ export default function MapPage() {
                           name: selectedStation.name || '',
                           city: selectedStation.city || 'Ankara',
                           district: selectedStation.district || '',
-                          statusType: selectedStation.statusType || 'Alt Yapı Tamamlandı',
+                          statusType: selectedStation.statusType || 'Bakıma Dahil',
                           powerType: selectedStation.powerType || '-',
                           pointType: selectedStation.pointType || 'YG Abonelik',
                           edas: selectedStation.edas || '-',
@@ -779,7 +779,7 @@ export default function MapPage() {
               </div>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

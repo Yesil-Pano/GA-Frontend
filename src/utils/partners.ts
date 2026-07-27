@@ -1,3 +1,8 @@
+import trugoLogo from '../assets/trugo-logo.png';
+import teslaLogo from '../assets/tesla-logo.png';
+import yesilPanoLogo from '../assets/yesil-pano-logo.png';
+import astorLogo from '../assets/astor-sarj-logo.jpg';
+
 export type RealPartnerKey = 'trugo' | 'tesla' | 'astor' | 'yesilpano';
 export type PartnerKey = RealPartnerKey | 'all';
 
@@ -11,6 +16,28 @@ export interface PartnerOption {
   tokens: string[];
   /** Harita / rozet rengi (TÜMÜ için nötr) */
   color: string;
+}
+
+/** Sağ üst header logoları (TÜMÜ için logo yok) */
+export const PARTNER_LOGOS: Record<RealPartnerKey, string> = {
+  trugo: trugoLogo,
+  tesla: teslaLogo,
+  yesilpano: yesilPanoLogo,
+  astor: astorLogo,
+};
+
+export function getPartnerLogo(key: PartnerKey | null | undefined): string | null {
+  if (!key || key === 'all') return null;
+  return PARTNER_LOGOS[key] ?? null;
+}
+
+/** JWT TenantId → partner (tenant kullanıcıları için logo kilidi) */
+export function getPartnerByTenantId(tenantId: string | null | undefined): PartnerOption | null {
+  if (!tenantId) return null;
+  const found = PARTNERS.find(
+    (p) => p.tenantId && p.tenantId.toLowerCase() === tenantId.toLowerCase(),
+  );
+  return found ?? null;
 }
 
 /** Firma renkleri (Super Admin harita) */

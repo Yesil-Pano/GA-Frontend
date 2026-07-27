@@ -5,6 +5,7 @@ import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
 import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '../utils/dateTime';
+import ModalOverlay from '../components/ModalOverlay';
 
 interface WorkOrderData {
   id: string;
@@ -34,6 +35,12 @@ interface WorkOrderData {
   fieldNoteAddedAt?: string | null;
   isPeriodic?: boolean;
   recurrenceInterval?: string;
+  titleEn?: string | null;
+  descriptionEn?: string | null;
+  mobileDescriptionEn?: string | null;
+  fieldNoteEn?: string | null;
+  translationProvider?: string | null;
+  translatedAt?: string | null;
 }
 
 interface OrderPhoto {
@@ -111,6 +118,9 @@ export default function WorkOrders() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [isEditingDetail, setIsEditingDetail] = useState(false);
   const [isSavingDetail, setIsSavingDetail] = useState(false);
+  /** TESLA: varsayılan EN; bayraklarla TR/EN */
+  const [displayLang, setDisplayLang] = useState<'en' | 'tr'>('en');
+  const [isTranslating, setIsTranslating] = useState(false);
   const [editFormData, setEditFormData] = useState({
     title: '',
     customerName: '',
@@ -197,7 +207,47 @@ export default function WorkOrders() {
     }
   }, []);
 
-  const openDetailModal = useCallback((order: WorkOrderData) => {
+  const isTeslaOrder = useCallback((order: WorkOrderData | null | undefined) => {
+    if (!order) return false;
+    if (partnerKey === 'tesla') return true;
+    return resolvePartnerKey({ tenantId: order.tenantId, name: order.customerName }) === 'tesla';
+  }, [partnerKey]);
+
+  const ensureTranslation = useCallback(async (order: WorkOrderData): Promise<WorkOrderData> => {
+    if (order.titleEn?.trim()) return order;
+    setIsTranslating(true);
+    try {
+      const { data } = await api.post<{
+        titleEn?: string;
+        descriptionEn?: string;
+        mobileDescriptionEn?: string;
+        fieldNoteEn?: string | null;
+        translationProvider?: string;
+        translatedAt?: string;
+      }>(`/workorders/${order.id}/translate`);
+      const updated: WorkOrderData = {
+        ...order,
+        titleEn: data.titleEn ?? null,
+        descriptionEn: data.descriptionEn ?? null,
+        mobileDescriptionEn: data.mobileDescriptionEn ?? null,
+        fieldNoteEn: data.fieldNoteEn ?? null,
+        translationProvider: data.translationProvider ?? null,
+        translatedAt: data.translatedAt ?? null,
+      };
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+      return updated;
+    } catch (error) {
+      console.error('Çeviri başarısız:', error);
+      alert('İngilizce çeviri alınamadı. API key’leri kontrol edin veya Türkçe görünüme geçin.');
+      return order;
+    } finally {
+      setIsTranslating(false);
+    }
+  }, []);
+
+  const openDetailModal = useCallback(async (order: WorkOrderData) => {
+    const tesla = isTeslaOrder(order);
+    setDisplayLang(tesla ? 'en' : 'tr');
     setSelectedOrder(order);
     setAssignUserId(order.assignedToUserId || '');
     setIsEditingDetail(false);
@@ -224,7 +274,12 @@ export default function WorkOrders() {
     });
     setIsDetailModalOpen(true);
     void loadOrderPhotos(order.id);
-  }, [loadOrderPhotos]);
+
+    if (tesla && !order.titleEn?.trim()) {
+      const translated = await ensureTranslation(order);
+      setSelectedOrder(translated);
+    }
+  }, [loadOrderPhotos, isTeslaOrder, ensureTranslation]);
 
   const closeDetailModal = () => {
     revokePhotoUrls();
@@ -233,6 +288,7 @@ export default function WorkOrders() {
     setSelectedOrder(null);
     setAssignUserId('');
     setIsEditingDetail(false);
+    setDisplayLang('tr');
   };
 
   const handleSaveDetail = async () => {
@@ -284,6 +340,12 @@ export default function WorkOrders() {
         assignedToUserName: data.assignedToUserName,
         isPeriodic: data.isPeriodic,
         recurrenceInterval: data.recurrenceInterval,
+        titleEn: null,
+        descriptionEn: null,
+        mobileDescriptionEn: null,
+        fieldNoteEn: null,
+        translationProvider: null,
+        translatedAt: null,
       };
 
       setSelectedOrder(updated);
@@ -295,6 +357,11 @@ export default function WorkOrders() {
         setFocusedMarkerPosition([...updated.position]);
       }
       alert(data.message || 'İş emri güncellendi.');
+
+      if (isTeslaOrder(updated) && displayLang === 'en') {
+        const translated = await ensureTranslation(updated);
+        setSelectedOrder(translated);
+      }
     } catch (error) {
       console.error('Güncelleme başarısız:', error);
       alert('İş emri kaydedilemedi.');
@@ -615,13 +682,42 @@ export default function WorkOrders() {
       </div>
 
       {isDetailModalOpen && selectedOrder && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+        <ModalOverlay className="animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
-              <div>
+              <div className="flex items-center gap-3 min-w-0">
                 <h2 className="text-base font-bold text-brand-navy">
                   İş Emri Detay Kartı {isEditingDetail ? '› Düzenleme Modu' : ''}
                 </h2>
+                {isTeslaOrder(selectedOrder) && !isEditingDetail && (
+                  <div className="flex items-center gap-1.5 shrink-0" title="Dil (TESLA)">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setDisplayLang('en');
+                        if (!selectedOrder.titleEn?.trim()) {
+                          const translated = await ensureTranslation(selectedOrder);
+                          setSelectedOrder(translated);
+                        }
+                      }}
+                      className={`text-xl leading-none px-1.5 py-0.5 rounded-md border transition ${displayLang === 'en' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                      aria-label="English"
+                    >
+                      🇬🇧
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDisplayLang('tr')}
+                      className={`text-xl leading-none px-1.5 py-0.5 rounded-md border transition ${displayLang === 'tr' ? 'border-red-500 bg-red-50 ring-2 ring-red-200' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                      aria-label="Türkçe"
+                    >
+                      🇹🇷
+                    </button>
+                    {isTranslating && (
+                      <span className="text-[10px] font-bold text-slate-400 ml-1">Çevriliyor…</span>
+                    )}
+                  </div>
+                )}
               </div>
               <button onClick={closeDetailModal} className="text-slate-400 hover:text-rose-600 font-bold text-2xl p-1 transition-colors">×</button>
             </div>
@@ -641,7 +737,11 @@ export default function WorkOrders() {
                 <input
                   disabled={!isEditingDetail}
                   className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail ? editFormData.title : selectedOrder.title}
+                  value={isEditingDetail ? editFormData.title : (
+                    (!isEditingDetail && displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.titleEn?.trim())
+                      ? selectedOrder.titleEn
+                      : selectedOrder.title
+                  )}
                   onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
                 />
               </div>
@@ -771,7 +871,11 @@ export default function WorkOrders() {
                   disabled={!isEditingDetail}
                   rows={2}
                   className={`w-full border rounded-lg p-2.5 font-medium outline-none resize-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail ? editFormData.description : (selectedOrder.description || 'Açıklama girilmemiş.')}
+                  value={isEditingDetail ? editFormData.description : (
+                    (displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.descriptionEn?.trim())
+                      ? selectedOrder.descriptionEn
+                      : (selectedOrder.description || 'Açıklama girilmemiş.')
+                  )}
                   onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
                 />
               </div>
@@ -781,7 +885,11 @@ export default function WorkOrders() {
                   disabled={!isEditingDetail}
                   rows={2}
                   className={`w-full border rounded-lg p-2.5 font-medium outline-none resize-none ${isEditingDetail ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail ? editFormData.mobileDescription : (selectedOrder.mobileDescription || 'Mühendis açıklaması girilmemiş.')}
+                  value={isEditingDetail ? editFormData.mobileDescription : (
+                    (displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.mobileDescriptionEn?.trim())
+                      ? selectedOrder.mobileDescriptionEn
+                      : (selectedOrder.mobileDescription || 'Mühendis açıklaması girilmemiş.')
+                  )}
                   onChange={(e) => setEditFormData({ ...editFormData, mobileDescription: e.target.value })}
                 />
               </div>
@@ -887,7 +995,11 @@ export default function WorkOrders() {
                   disabled
                   rows={3}
                   className="w-full bg-amber-50/50 border border-amber-100 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none whitespace-pre-wrap"
-                  value={selectedOrder.fieldNote?.trim() || 'Saha notu girilmemiş.'}
+                  value={
+                    (displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.fieldNoteEn?.trim())
+                      ? selectedOrder.fieldNoteEn
+                      : (selectedOrder.fieldNote?.trim() || 'Saha notu girilmemiş.')
+                  }
                 />
                 {selectedOrder.fieldNoteAddedAt && (
                   <p className="text-[10px] text-slate-400 mt-1 font-semibold">Eklenme: {selectedOrder.fieldNoteAddedAt}</p>
@@ -983,13 +1095,11 @@ export default function WorkOrders() {
               )}
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {lightbox && lightbox.photos.length > 0 && (
-        <div
-          className="fixed inset-0 z-80 bg-slate-950/90 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
+        <ModalOverlay className="bg-slate-950/90" onClick={() => setLightbox(null)}
         >
           <div className="relative max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between text-white mb-3 gap-3">
@@ -1042,7 +1152,7 @@ export default function WorkOrders() {
               Gezinmek için ← → ok tuşları · Esc ile kapat
             </p>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
     </div>

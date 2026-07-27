@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import ModalOverlay from '../components/ModalOverlay';
 
 interface SurveyData {
   id: string;
@@ -248,7 +249,7 @@ export default function Surveys() {
 
       {/* Anket ekleme — merkez modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <div className="flex items-center gap-1.5 text-xs font-bold">
@@ -315,12 +316,12 @@ export default function Surveys() {
           </div>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* READ-ONLY DETAY MODALI */}
       {isDetailModalOpen && selectedSurvey && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fadeIn">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <h2 className="text-base font-bold text-brand-navy">📋 Rapor Kartı: {selectedSurvey.status}</h2>
@@ -374,7 +375,7 @@ export default function Surveys() {
               <button type="button" onClick={() => setIsDetailModalOpen(false)} className="bg-slate-700 text-white font-bold px-5 py-2 rounded-xl hover:bg-slate-800 transition">Kapat</button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
     </div>

@@ -6,11 +6,12 @@ import type { MapMarker } from '../components/MapView';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
-import trugoLogoImg from '../assets/trugo-logo.png';
 import {
   SUPER_ADMIN_PARTNERS,
   getPartnerByKey,
+  getPartnerByTenantId,
   getPartnerColor,
+  getPartnerLogo,
   getStoredPartnerKey,
   resolvePartnerKey,
   storePartnerKey,
@@ -53,10 +54,6 @@ export default function MainLayout() {
   );
 
   const [isPartnerDropdownOpen, setIsPartnerDropdownOpen] = useState(false);
-  const [activePartner, setActivePartner] = useState<PartnerOption>(() =>
-    getPartnerByKey(getStoredPartnerKey()),
-  );
-
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -65,14 +62,31 @@ export default function MainLayout() {
 
   const token = localStorage.getItem('token');
   let isSuperAdmin = false;
+  let jwtTenantId: string | null = null;
   if (token) {
     try {
       const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       isSuperAdmin = payload.email === 'admin@theobuz.com';
+      jwtTenantId = typeof payload.TenantId === 'string' ? payload.TenantId : null;
     } catch (e) {
       console.error('Super Admin yetki mührü çözülemedi:', e);
     }
   }
+
+  /** SuperAdmin: sol menü seçimi. Tenant kullanıcı: kendi firması kilitli (seçici yok). */
+  const lockedTenantPartner = !isSuperAdmin ? getPartnerByTenantId(jwtTenantId) : null;
+  const [activePartner, setActivePartner] = useState<PartnerOption>(() => {
+    if (!isSuperAdmin) {
+      return getPartnerByTenantId(jwtTenantId) ?? getPartnerByKey(getStoredPartnerKey());
+    }
+    return getPartnerByKey(getStoredPartnerKey());
+  });
+
+  useEffect(() => {
+    if (lockedTenantPartner) {
+      setActivePartner(lockedTenantPartner);
+    }
+  }, [lockedTenantPartner?.key]);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -382,15 +396,19 @@ export default function MainLayout() {
               {isListPanelHidden ? '☰ Listeyi Göster' : '🗺 Yalnızca Harita'}
             </button>
           )}
-          {partnerKey === 'trugo' && (
-            <img
-              src={trugoLogoImg}
-              alt="Trugo"
-              title="Trugo Şarj İstasyonları"
-              className="h-12 w-auto max-w-[220px] object-contain select-none"
-              draggable={false}
-            />
-          )}
+          {(() => {
+            const headerLogo = getPartnerLogo(partnerKey);
+            if (!headerLogo || partnerKey === 'all') return null;
+            return (
+              <img
+                src={headerLogo}
+                alt={activePartner.name}
+                title={activePartner.name}
+                className="h-12 w-auto max-w-[220px] object-contain select-none"
+                draggable={false}
+              />
+            );
+          })()}
           <div className="relative">
             <button
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}

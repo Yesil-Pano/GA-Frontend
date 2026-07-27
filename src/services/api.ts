@@ -29,9 +29,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    const status = error.response?.status;
+    const code = error.response?.data?.code;
+    if (status === 401 || code === 'DEMO_EXPIRED' || code === 'TENANT_INACTIVE') {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      if (code === 'DEMO_EXPIRED') {
+        sessionStorage.setItem('ga_logout_reason', 'Demo süreniz dolmuştur. Erişim kapatıldı.');
+      }
       window.location.href = '/login';
     }
     return Promise.reject(error);

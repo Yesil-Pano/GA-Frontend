@@ -5,6 +5,7 @@ import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
+import ModalOverlay from '../components/ModalOverlay';
 
 interface TeamMemberData {
   id: string;
@@ -13,7 +14,8 @@ interface TeamMemberData {
   email: string;
   tenantId?: string;
   project: string;
-  projectIds: string[]; 
+  projectIds: string[];
+  assignedProjects?: { id: string; name: string }[];
   plate: string;
   phone: string;
   teamLeader: string;
@@ -24,6 +26,19 @@ interface TeamMemberData {
   position: [number, number];
   hasLiveLocation?: boolean;
   locationUpdatedAt?: string | null;
+  hasAuthorizationDocument?: boolean;
+  authorizationDocumentFileName?: string | null;
+  authorizationDocumentFileSize?: number | null;
+  personnelDocumentCount?: number;
+}
+
+interface TeamDocumentItem {
+  id: string;
+  documentType: 'Authorization' | 'Personnel' | string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  uploadedAt: string;
 }
 
 interface AssignedWorkOrder {
@@ -92,6 +107,14 @@ export default function Teams() {
   const [refreshingLocations, setRefreshingLocations] = useState(false);
   const [lastLocationRefresh, setLastLocationRefresh] = useState<Date | null>(null);
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [authDocInputKey, setAuthDocInputKey] = useState(0);
+  const [personnelDocInputKey, setPersonnelDocInputKey] = useState(0);
+  const [canManageAuthorizationDocuments, setCanManageAuthorizationDocuments] = useState(false);
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [docsModalFilter, setDocsModalFilter] = useState<'all' | 'Authorization' | 'Personnel'>('all');
+  const [teamDocuments, setTeamDocuments] = useState<TeamDocumentItem[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
 
   const token = localStorage.getItem('token');
   let isSuperAdmin = false;
@@ -132,10 +155,11 @@ export default function Teams() {
     const initPageData = async () => {
       setIsLoading(true);
       try {
-        const [teamsRes, ordersRes, lookupsRes] = await Promise.all([
+        const [teamsRes, ordersRes, lookupsRes, capsRes] = await Promise.all([
           api.get('/teams'),
           api.get('/workorders'),
-          api.get('/teams/lookups')
+          api.get('/teams/lookups'),
+          api.get<{ canManageAuthorizationDocuments?: boolean }>('/teams/capabilities').catch(() => ({ data: { canManageAuthorizationDocuments: false } })),
         ]);
 
         let tenantList: TenantLookup[] = [];
@@ -149,6 +173,7 @@ export default function Teams() {
           setAllWorkOrders(ordersRes.data);
           setProjects(lookupsRes.data);
           setGlobalTenants(tenantList);
+          setCanManageAuthorizationDocuments(!!capsRes.data?.canManageAuthorizationDocuments);
         }
       } catch (error) {
         console.error("İlk yükleme hatası:", error);
@@ -260,6 +285,16 @@ export default function Teams() {
     trIncludes(team.plate, searchTerm)
   );
 
+  /** Düzenleme: partner filtreli lookups + personelin mevcut atamaları */
+  const editProjectOptions = (() => {
+    const map = new Map<string, ProjectLookup>();
+    for (const p of projects) map.set(p.id, p);
+    for (const p of selectedTeam?.assignedProjects || []) {
+      if (!map.has(p.id)) map.set(p.id, { id: p.id, name: p.name });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  })();
+
   const assignedJobs = allWorkOrders.filter(
     (order) =>
       order.assignedToUserId === selectedTeam?.id &&
@@ -283,6 +318,163 @@ export default function Teams() {
     } catch (error) {
       console.error(error);
       alert('İş emri geri çekilemedi.');
+    }
+  };
+
+  const patchTeamById = (teamId: string, patch: Partial<TeamMemberData>) => {
+    setSelectedTeam((prev) => (prev && prev.id === teamId ? { ...prev, ...patch } : prev));
+    setTeams((prev) => prev.map((t) => (t.id === teamId ? { ...t, ...patch } : t)));
+  };
+
+  const formatFileSize = (bytes?: number | null) => {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const documentIcon = (fileName: string, contentType: string) => {
+    const lower = `${fileName} ${contentType}`.toLowerCase();
+    if (lower.includes('pdf')) return '📄';
+    if (lower.includes('image') || /\.(jpg|jpeg|png|webp)$/i.test(fileName)) return '🖼️';
+    if (/\.(xls|xlsx)$/i.test(fileName) || lower.includes('sheet') || lower.includes('excel')) return '📊';
+    if (/\.(doc|docx)$/i.test(fileName) || lower.includes('word')) return '📝';
+    return '📎';
+  };
+
+  const loadTeamDocuments = async (teamId: string) => {
+    setIsLoadingDocs(true);
+    try {
+      const { data } = await api.get<{ items: TeamDocumentItem[] }>(`/teams/${teamId}/documents`);
+      const items = data.items || [];
+      setTeamDocuments(items);
+      const auth = items.find((d) => d.documentType === 'Authorization');
+      const personnelCount = items.filter((d) => d.documentType === 'Personnel').length;
+      patchTeamById(teamId, {
+        hasAuthorizationDocument: !!auth,
+        authorizationDocumentFileName: auth?.fileName ?? null,
+        authorizationDocumentFileSize: auth?.fileSize ?? null,
+        personnelDocumentCount: personnelCount,
+      });
+    } catch (error) {
+      console.error(error);
+      setTeamDocuments([]);
+    } finally {
+      setIsLoadingDocs(false);
+    }
+  };
+
+  const openDocumentsModal = async (filter: 'all' | 'Authorization' | 'Personnel' = 'all') => {
+    if (!selectedTeam || !canManageAuthorizationDocuments) return;
+    setDocsModalFilter(filter);
+    setIsDocsModalOpen(true);
+    await loadTeamDocuments(selectedTeam.id);
+  };
+
+  const handleUploadDocument = async (
+    file: File | null,
+    type: 'Authorization' | 'Personnel',
+  ) => {
+    if (!selectedTeam || !file) return;
+    const teamId = selectedTeam.id;
+
+    if (file.size > 27 * 1024 * 1024) {
+      alert('Dosya boyutu en fazla 27 MB olabilir.');
+      if (type === 'Authorization') setAuthDocInputKey((k) => k + 1);
+      else setPersonnelDocInputKey((k) => k + 1);
+      return;
+    }
+
+    if (type === 'Authorization') {
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        alert('Yetki Belgesi yalnızca PDF olabilir.');
+        setAuthDocInputKey((k) => k + 1);
+        return;
+      }
+    } else {
+      const ok = /\.(pdf|jpg|jpeg|png|webp|doc|docx|xls|xlsx)$/i.test(file.name);
+      if (!ok) {
+        alert('Personel evrakı: PDF, JPG, PNG, WEBP, DOC, DOCX, XLS, XLSX.');
+        setPersonnelDocInputKey((k) => k + 1);
+        return;
+      }
+      if ((selectedTeam.personnelDocumentCount ?? 0) >= 10) {
+        alert('Personel Evrak Bilgisi en fazla 10 dosya olabilir.');
+        setPersonnelDocInputKey((k) => k + 1);
+        return;
+      }
+    }
+
+    setIsUploadingDoc(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post(`/teams/${teamId}/documents?type=${type}`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (type === 'Authorization') {
+        patchTeamById(teamId, {
+          hasAuthorizationDocument: true,
+          authorizationDocumentFileName: data.fileName,
+          authorizationDocumentFileSize: data.fileSize,
+        });
+      } else {
+        patchTeamById(teamId, {
+          personnelDocumentCount: (selectedTeam.personnelDocumentCount ?? 0) + 1,
+        });
+      }
+      if (isDocsModalOpen) await loadTeamDocuments(teamId);
+      alert(data.message || 'Dosya kaydedildi.');
+    } catch (err) {
+      const error = err as AxiosErrorResponse;
+      console.error(error);
+      alert(error.response?.data?.message || 'Dosya yüklenemedi.');
+    } finally {
+      setIsUploadingDoc(false);
+      if (type === 'Authorization') setAuthDocInputKey((k) => k + 1);
+      else setPersonnelDocInputKey((k) => k + 1);
+    }
+  };
+
+  const handleViewDocument = async (doc: TeamDocumentItem) => {
+    if (!selectedTeam) return;
+    try {
+      const { data } = await api.get(`/teams/${selectedTeam.id}/documents/${doc.id}`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([data], { type: doc.contentType || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      console.error(error);
+      alert('Dosya açılamadı.');
+    }
+  };
+
+  const handleDeleteDocument = async (doc: TeamDocumentItem) => {
+    if (!selectedTeam) return;
+    const teamId = selectedTeam.id;
+    const label = doc.documentType === 'Authorization' ? 'Yetki Belgesi' : 'Personel evrakı';
+    if (!window.confirm(`${label} silinsin mi?\n${doc.fileName}`)) return;
+    try {
+      const { data } = await api.delete(`/teams/${teamId}/documents/${doc.id}`);
+      if (doc.documentType === 'Authorization') {
+        patchTeamById(teamId, {
+          hasAuthorizationDocument: false,
+          authorizationDocumentFileName: null,
+          authorizationDocumentFileSize: null,
+        });
+      } else {
+        patchTeamById(teamId, {
+          personnelDocumentCount: Math.max(0, (selectedTeam.personnelDocumentCount ?? 1) - 1),
+        });
+      }
+      setTeamDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+      alert(data.message || 'Silindi.');
+    } catch (err) {
+      const error = err as AxiosErrorResponse;
+      console.error(error);
+      alert(error.response?.data?.message || 'Silinemedi.');
     }
   };
 
@@ -411,7 +603,7 @@ export default function Teams() {
 
       {/* Ekip ekleme — merkez modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <h2 className="text-base font-bold text-brand-navy">Ekip Ekle</h2>
@@ -477,12 +669,12 @@ export default function Teams() {
           </div>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* EDİTLENEBİLİR GELİŞMİŞ MERKEZ MODAL */}
       {isDetailModalOpen && selectedTeam && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalOverlay>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-fadeIn">
             
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
@@ -575,16 +767,96 @@ export default function Teams() {
                       <input disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.plate} onChange={e => setEditFormData({...editFormData, plate: e.target.value})} />
                     </div>
 
+                    {canManageAuthorizationDocuments && (
+                    <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Sol: Yetki Belgesi */}
+                      <div>
+                        <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Yetki Belgesi</label>
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-[108px]">
+                          {selectedTeam.hasAuthorizationDocument ? (
+                            <>
+                              <p className="text-[11px] font-semibold text-slate-700 truncate" title={selectedTeam.authorizationDocumentFileName || undefined}>
+                                📄 {selectedTeam.authorizationDocumentFileName || 'yetki-belgesi.pdf'}
+                                {selectedTeam.authorizationDocumentFileSize
+                                  ? ` · ${formatFileSize(selectedTeam.authorizationDocumentFileSize)}`
+                                  : ''}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => openDocumentsModal('Authorization')} className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                                  Görüntüle
+                                </button>
+                                <label className={`text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-500 text-white hover:bg-amber-600 cursor-pointer ${isUploadingDoc ? 'opacity-60 pointer-events-none' : ''}`}>
+                                  {isUploadingDoc ? '…' : 'Değiştir'}
+                                  <input
+                                    key={authDocInputKey}
+                                    type="file"
+                                    accept="application/pdf,.pdf"
+                                    className="hidden"
+                                    disabled={isUploadingDoc}
+                                    onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Authorization')}
+                                  />
+                                </label>
+                              </div>
+                            </>
+                          ) : (
+                            <label className={`inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800 cursor-pointer ${isUploadingDoc ? 'opacity-60 pointer-events-none' : ''}`}>
+                              {isUploadingDoc ? 'Yükleniyor...' : '📎 PDF Yükle'}
+                              <input
+                                key={authDocInputKey}
+                                type="file"
+                                accept="application/pdf,.pdf"
+                                className="hidden"
+                                disabled={isUploadingDoc}
+                                onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Authorization')}
+                              />
+                            </label>
+                          )}
+                          <p className="text-[10px] text-slate-400 font-medium">1 PDF · max 27 MB · Faz 2 mobil paylaşım</p>
+                        </div>
+                      </div>
+
+                      {/* Sağ: Personel Evrak Bilgisi */}
+                      <div>
+                        <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Personel Evrak Bilgisi</label>
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-[108px]">
+                          <p className="text-[11px] font-semibold text-slate-700">
+                            {(selectedTeam.personnelDocumentCount ?? 0)} / 10 dosya
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={() => openDocumentsModal('Personnel')} className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                              Evrakları Aç
+                            </button>
+                            <label className={`text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer ${isUploadingDoc || (selectedTeam.personnelDocumentCount ?? 0) >= 10 ? 'opacity-60 pointer-events-none' : ''}`}>
+                              {isUploadingDoc ? '…' : '+ Ekle'}
+                              <input
+                                key={personnelDocInputKey}
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                className="hidden"
+                                disabled={isUploadingDoc || (selectedTeam.personnelDocumentCount ?? 0) >= 10}
+                                onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Personnel')}
+                              />
+                            </label>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-medium">PDF / görsel / Word / Excel · max 10 · 27 MB</p>
+                        </div>
+                      </div>
+                    </div>
+                    )}
+
                     <div className="col-span-2">
                       <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Bağlı Olduğu Projeler (Çoklu Seçim)</label>
                       {isEditingModal ? (
                         <div className="w-full border border-blue-400 rounded-xl p-3 bg-white max-h-36 overflow-y-auto space-y-2 shadow-inner">
-                          {projects.map((proj) => (
+                          {editProjectOptions.map((proj) => (
                             <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold">
                               <input type="checkbox" className="w-4 h-4 rounded text-brand-orange" checked={editProjectIds.includes(proj.id)} onChange={() => setEditProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
                               <span>{proj.name}</span>
                             </label>
                           ))}
+                          {editProjectOptions.length === 0 && (
+                            <p className="text-[11px] text-slate-400 font-medium">Seçilebilir proje bulunamadı.</p>
+                          )}
                         </div>
                       ) : (
                         <textarea disabled rows={2} className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-lg p-2.5 cursor-not-allowed resize-none" value={selectedTeam.project} />
@@ -649,9 +921,168 @@ export default function Teams() {
             </div>
 
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
+      {isDocsModalOpen && selectedTeam && (
+        <ModalOverlay className="animate-fadeIn">
+          <div
+            className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Evrak Yönetimi</p>
+                <h2 className="text-lg font-bold text-brand-navy truncate">{selectedTeam.name}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Yetki Belgesi ve Personel Evrak Bilgisi</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDocsModalOpen(false)}
+                className="text-slate-400 hover:text-rose-600 font-bold text-2xl leading-none px-1"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="px-6 pt-4 flex flex-wrap gap-2">
+              {([
+                { key: 'all' as const, label: 'Tümü' },
+                { key: 'Authorization' as const, label: 'Yetki Belgesi' },
+                { key: 'Personnel' as const, label: 'Personel Evrak' },
+              ]).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setDocsModalFilter(tab.key)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full border transition ${
+                    docsModalFilter === tab.key
+                      ? 'bg-brand-navy text-white border-brand-navy'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <div className="ml-auto flex gap-2">
+                {docsModalFilter !== 'Personnel' && (
+                  <label className={`text-xs font-bold px-3 py-1.5 rounded-full bg-slate-800 text-white cursor-pointer hover:bg-slate-900 ${isUploadingDoc ? 'opacity-60 pointer-events-none' : ''}`}>
+                    Yetki PDF
+                    <input
+                      key={`modal-auth-${authDocInputKey}`}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      disabled={isUploadingDoc}
+                      onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Authorization')}
+                    />
+                  </label>
+                )}
+                {docsModalFilter !== 'Authorization' && (
+                  <label className={`text-xs font-bold px-3 py-1.5 rounded-full bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700 ${isUploadingDoc || (selectedTeam.personnelDocumentCount ?? 0) >= 10 ? 'opacity-60 pointer-events-none' : ''}`}>
+                    + Personel Evrak
+                    <input
+                      key={`modal-pers-${personnelDocInputKey}`}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
+                      className="hidden"
+                      disabled={isUploadingDoc || (selectedTeam.personnelDocumentCount ?? 0) >= 10}
+                      onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Personnel')}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              {isLoadingDocs ? (
+                <div className="py-16 text-center text-sm font-bold text-slate-400 animate-pulse">Evraklar yükleniyor…</div>
+              ) : (
+                (() => {
+                  const filtered = teamDocuments.filter((d) =>
+                    docsModalFilter === 'all' ? true : d.documentType === docsModalFilter,
+                  );
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="py-16 text-center">
+                        <div className="text-4xl mb-3 opacity-40">📂</div>
+                        <p className="text-sm font-bold text-slate-500">Bu kategoride dosya yok</p>
+                        <p className="text-xs text-slate-400 mt-1">Yukarıdan dosya ekleyebilirsiniz</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {filtered.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="group relative rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm hover:shadow-md hover:border-brand-orange/40 transition"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-inner">
+                              {documentIcon(doc.fileName, doc.contentType)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                                {doc.documentType === 'Authorization' ? 'Yetki Belgesi' : 'Personel Evrak'}
+                              </p>
+                              <p className="text-sm font-bold text-brand-navy truncate" title={doc.fileName}>
+                                {doc.fileName}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                {formatFileSize(doc.fileSize)}
+                                {doc.uploadedAt ? ` · ${doc.uploadedAt}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleViewDocument(doc)}
+                              className="flex-1 text-[11px] font-bold px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              Aç
+                            </button>
+                            {doc.documentType === 'Authorization' ? (
+                              <label className="flex-1 text-center text-[11px] font-bold px-3 py-2 rounded-xl bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">
+                                Değiştir
+                                <input
+                                  type="file"
+                                  accept="application/pdf,.pdf"
+                                  className="hidden"
+                                  disabled={isUploadingDoc}
+                                  onChange={(e) => handleUploadDocument(e.target.files?.[0] ?? null, 'Authorization')}
+                                />
+                              </label>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDocument(doc)}
+                              className="text-[11px] font-bold px-3 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                            >
+                              Sil
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsDocsModalOpen(false)}
+                className="bg-slate-800 text-white font-bold px-6 py-2.5 rounded-xl hover:bg-slate-900 transition"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
     </div>
   );
 }
