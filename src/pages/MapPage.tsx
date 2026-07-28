@@ -119,6 +119,16 @@ const StationListCard = memo(function StationListCard({
 
 export default function MapPage() {
   const navigate = useNavigate();
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+  if (token) {
+    try {
+      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch {
+      /* ignore */
+    }
+  }
   const [searchTerm, setSearchTerm] = useState('');
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
@@ -289,7 +299,10 @@ export default function MapPage() {
             ...prev,
             operationUserId: prev.operationUserId || mapped[0].id,
             openedByUserId: prev.openedByUserId || mapped[0].id,
-            assignedToUserId: prev.assignedToUserId || mapped[0].id,
+            // Tenant asla atayamaz; Super Admin boş bırakabilir veya seçebilir
+            assignedToUserId: isSuperAdmin
+              ? (prev.assignedToUserId || '')
+              : '',
           }));
         }
         setLookupsLoaded(true);
@@ -357,10 +370,6 @@ export default function MapPage() {
 
   const handleBulkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bulkForm.assignedToUserId) {
-      alert('Sahacı ataması zorunludur.');
-      return;
-    }
     if (selectedIds.length === 0) {
       alert('En az bir nokta seçin.');
       return;
@@ -380,7 +389,7 @@ export default function MapPage() {
         endDate: new Date(bulkForm.endDate).toISOString(),
         operationUserId: bulkForm.operationUserId || null,
         openedByUserId: bulkForm.openedByUserId || null,
-        assignedToUserId: bulkForm.assignedToUserId,
+        assignedToUserId: isSuperAdmin ? (bulkForm.assignedToUserId || null) : null,
         isPeriodic: bulkForm.isPeriodic,
         recurrenceInterval: bulkForm.isPeriodic ? bulkForm.recurrenceInterval : 'None',
       });
@@ -542,11 +551,29 @@ export default function MapPage() {
               </div>
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className={`grid grid-cols-1 gap-3 ${isSuperAdmin ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                   <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
                   <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Atanan Sahacı *</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.assignedToUserId} onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  {isSuperAdmin && (
+                    <div>
+                      <label className="block text-xs font-bold mb-1">İş Atanan Sahacı</label>
+                      <select
+                        className="w-full border rounded-lg p-2.5"
+                        value={bulkForm.assignedToUserId}
+                        onChange={(e) => setBulkForm({ ...bulkForm, assignedToUserId: e.target.value })}
+                        disabled={lookupsLoading && !lookupsLoaded}
+                      >
+                        <option value="">Atanmamış (sonra ata)</option>
+                        {personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
+                {!isSuperAdmin && (
+                  <p className="text-[11px] text-slate-600 font-medium">
+                    Sahacı ataması Super Admin tarafından yapılır. İş emirleri Atanmamış olarak açılır.
+                  </p>
+                )}
               </div>
               <div className="flex gap-3 pt-3 border-t">
                 <button type="button" onClick={() => setIsBulkOpen(false)} className="flex-1 border rounded-xl py-3 font-bold hover:bg-slate-50">İptal</button>

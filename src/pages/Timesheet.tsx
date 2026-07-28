@@ -43,6 +43,16 @@ interface LookupData {
 
 export default function Timesheet() {
   const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
+  const token = localStorage.getItem('token');
+  let isSuperAdmin = false;
+  if (token) {
+    try {
+      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      isSuperAdmin = payload.email === 'admin@theobuz.com';
+    } catch {
+      /* ignore */
+    }
+  }
   // Zaman ve Görünüm Kontrolleri
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [view, setView] = useState<'Month' | 'Week' | 'Day'>('Month');
@@ -108,7 +118,7 @@ export default function Timesheet() {
               ...prev,
               operationUserId: mappedPersonnel[0].id,
               openedByUserId: mappedPersonnel[0].id,
-              assignedToUserId: mappedPersonnel[0].id,
+              assignedToUserId: isSuperAdmin ? (prev.assignedToUserId || '') : '',
             }));
           }
         }
@@ -271,7 +281,7 @@ export default function Timesheet() {
         startDate: new Date(formData.startDate).toISOString(), endDate: new Date(formData.endDate).toISOString(),
         latitude: Number(formData.lat), longitude: Number(formData.lng),
         operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null,
-        assignedToUserId: formData.assignedToUserId || null,
+        assignedToUserId: isSuperAdmin ? (formData.assignedToUserId || null) : null,
         isPeriodic: formData.isPeriodic,
         recurrenceInterval: formData.isPeriodic ? formData.recurrenceInterval : 'None',
       });
@@ -504,7 +514,19 @@ export default function Timesheet() {
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            {isSuperAdmin ? (
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label>
+                <select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>
+                  <option value="">Atanmamış (sonra ata)</option>
+                  {lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                </select>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-600 font-medium">
+                Sahacı ataması Super Admin tarafından yapılır. İş emri Atanmamış olarak açılır.
+              </p>
+            )}
           </div>
           <div className="flex gap-3 pt-4 border-t">
             <button type="button" onClick={() => setIsDrawerOpen(false)} className="flex-1 border border-slate-300 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-50 transition">İptal</button>

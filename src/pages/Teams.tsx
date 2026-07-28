@@ -304,6 +304,10 @@ export default function Teams() {
   );
 
   const handleWithdrawJob = async (jobId: string) => {
+    if (!isSuperAdmin) {
+      alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
+      return;
+    }
     if (!window.confirm('Bu iş emri ataması geri çekilsin mi?')) return;
     try {
       await api.put(`/workorders/${jobId}/assign`, { assignedToUserId: null });
@@ -886,6 +890,7 @@ export default function Teams() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[10px] text-slate-400 font-semibold bg-white border border-slate-200 rounded px-1.5 py-0.5">{job.status}</span>
+                          {isSuperAdmin && (
                           <button
                             type="button"
                             onClick={() => handleWithdrawJob(job.id)}
@@ -893,6 +898,7 @@ export default function Teams() {
                           >
                             Geri Çek
                           </button>
+                          )}
                         </div>
                       </div>
                     ))

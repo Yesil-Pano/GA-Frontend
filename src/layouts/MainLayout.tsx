@@ -45,6 +45,7 @@ export default function MainLayout() {
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [focusedMarkerPosition, setFocusedMarkerPosition] = useState<[number, number] | null>(null);
+  const [focusedMarkerPath, setFocusedMarkerPath] = useState(location.pathname);
   const [mapFilter, setMapFilter] = useState('Tümü');
   const [liveMarkers, setLiveMarkers] = useState<MapMarker[]>([]);
   /** /map sayfası sol listesi — harita ile aynı GET /stations yanıtı (çift fetch yok) */
@@ -75,18 +76,10 @@ export default function MainLayout() {
 
   /** SuperAdmin: sol menü seçimi. Tenant kullanıcı: kendi firması kilitli (seçici yok). */
   const lockedTenantPartner = !isSuperAdmin ? getPartnerByTenantId(jwtTenantId) : null;
-  const [activePartner, setActivePartner] = useState<PartnerOption>(() => {
-    if (!isSuperAdmin) {
-      return getPartnerByTenantId(jwtTenantId) ?? getPartnerByKey(getStoredPartnerKey());
-    }
-    return getPartnerByKey(getStoredPartnerKey());
-  });
-
-  useEffect(() => {
-    if (lockedTenantPartner) {
-      setActivePartner(lockedTenantPartner);
-    }
-  }, [lockedTenantPartner?.key]);
+  const [selectedPartner, setSelectedPartner] = useState<PartnerOption>(() =>
+    getPartnerByKey(getStoredPartnerKey()),
+  );
+  const activePartner = lockedTenantPartner ?? selectedPartner;
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -225,16 +218,19 @@ export default function MainLayout() {
     return () => window.clearTimeout(timeoutId);
   }, [fetchMapData]);
 
-  // Sayfa değişince önceki nokta odağını temizle — harita varsayılan lat/lng + zoom'a döner
-  useEffect(() => {
-    setFocusedMarkerPosition(null);
-  }, [location.pathname]);
-
   const handlePartnerSelect = (partner: PartnerOption) => {
-    setActivePartner(partner);
+    setSelectedPartner(partner);
     storePartnerKey(partner.key);
     setIsPartnerDropdownOpen(false);
   };
+
+  const handleSetFocusedMarkerPosition = useCallback(
+    (pos: [number, number] | null) => {
+      setFocusedMarkerPath(location.pathname);
+      setFocusedMarkerPosition(pos);
+    },
+    [location.pathname],
+  );
 
   const handleNotificationClick = async (n: AppNotificationItem) => {
     try {
@@ -290,9 +286,15 @@ export default function MainLayout() {
     setIsListPanelHidden(false);
   }
 
+  // Sayfa değişince önceki nokta odağını temizle — harita varsayılan lat/lng + zoom'a döner
+  if (focusedMarkerPath !== location.pathname) {
+    setFocusedMarkerPath(location.pathname);
+    setFocusedMarkerPosition(null);
+  }
+
   const filteredMarkers = liveMarkers.filter((m) => mapFilter === 'Tümü' || m.priority === mapFilter);
   const outletContextValue = {
-    setFocusedMarkerPosition,
+    setFocusedMarkerPosition: handleSetFocusedMarkerPosition,
     mapFilter,
     setMapFilter,
     refreshMapData: fetchMapData,
@@ -404,7 +406,7 @@ export default function MainLayout() {
                 src={headerLogo}
                 alt={activePartner.name}
                 title={activePartner.name}
-                className="h-12 w-auto max-w-[220px] object-contain select-none"
+                className="h-12 w-auto max-w-55 object-contain select-none"
                 draggable={false}
               />
             );

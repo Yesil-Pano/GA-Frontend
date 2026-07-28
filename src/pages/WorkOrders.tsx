@@ -1,6 +1,7 @@
 // src/pages/WorkOrders.tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
+import axios from 'axios';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
@@ -90,7 +91,9 @@ export default function WorkOrders() {
     }
   }
 
-  const [filter, setFilter] = useState('Tümü');
+  const [filter, setFilter] = useState(isSuperAdmin ? 'Atanmamış' : 'Tümü');
+  const [bulkAssignUserId, setBulkAssignUserId] = useState('');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
   
@@ -151,7 +154,12 @@ export default function WorkOrders() {
   const filteredOrders = orders
     .filter(order => {
       if (filter === 'Tümü') return true;
-      if (filter === 'Atanmamış') return !order.assignedToUserName || order.assignedToUserName === '' || order.assignedToUserName === 'Atanmamış';
+      if (filter === 'Atanmamış') {
+        return !order.assignedToUserId
+          || !order.assignedToUserName
+          || order.assignedToUserName === ''
+          || order.assignedToUserName === 'Atanmamış';
+      }
       if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
       if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
       return order.status === filter;
@@ -372,6 +380,10 @@ export default function WorkOrders() {
 
   const handleAssign = async () => {
     if (!selectedOrder) return;
+    if (!isSuperAdmin) {
+      alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
+      return;
+    }
     setIsAssigning(true);
     try {
       const { data } = await api.put<{
@@ -425,6 +437,49 @@ export default function WorkOrders() {
     } catch (error) {
       console.error(error);
       alert('Toplu onay başarısız.');
+    }
+  };
+
+  const handleBulkAssign = async () => {
+    if (!isSuperAdmin) {
+      alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
+      return;
+    }
+    if (selectedOrders.length === 0) return;
+    if (!bulkAssignUserId) {
+      alert('Lütfen ekipten bir kişi seçin.');
+      return;
+    }
+    const person = lookups.personnel.find((p) => p.id === bulkAssignUserId);
+    if (!window.confirm(`${selectedOrders.length} iş emri ${person?.fullName || 'seçilen kişiye'} atansın mı?`)) return;
+    setIsBulkAssigning(true);
+    const idsSnapshot = [...selectedOrders];
+    try {
+      const { data } = await api.post<{ message?: string }>('/workorders/bulk-assign', {
+        ids: idsSnapshot,
+        assignedToUserId: bulkAssignUserId,
+      });
+      setSelectedOrders([]);
+      setBulkAssignUserId('');
+      const res = await api.get('/workorders');
+      setOrders(res.data);
+      await refreshMapData();
+      if (selectedOrder && idsSnapshot.includes(selectedOrder.id)) {
+        const refreshed = res.data.find((o: WorkOrderData) => o.id === selectedOrder.id);
+        if (refreshed) {
+          setSelectedOrder(refreshed);
+          setAssignUserId(refreshed.assignedToUserId || '');
+        }
+      }
+      alert(data.message || 'Atama tamamlandı.');
+    } catch (error: unknown) {
+      console.error(error);
+      const message = axios.isAxiosError<{ message?: string }>(error)
+        ? error.response?.data?.message
+        : undefined;
+      alert(message || 'Toplu atama başarısız.');
+    } finally {
+      setIsBulkAssigning(false);
     }
   };
 
@@ -619,12 +674,58 @@ export default function WorkOrders() {
       </div>
 
       {selectedOrders.length > 0 && (
-        <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 flex justify-between items-center shadow-md">
-          <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
-          <div className="flex gap-3">
-            <button type="button" onClick={handleBulkApprove} className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">✓ Toplu Onayla</button>
-            <button type="button" onClick={handleBulkDelete} className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
+        <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 shadow-md space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={handleBulkApprove} className="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">✓ Toplu Onayla</button>
+              <button type="button" onClick={handleBulkDelete} className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
+            </div>
           </div>
+          {isSuperAdmin && (
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-white/10 rounded-lg p-3">
+              <div className="flex-1 max-h-40 overflow-y-auto bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {lookups.personnel.length === 0 ? (
+                  <p className="text-xs text-slate-500 p-3">Ekip listesi yüklenemedi.</p>
+                ) : (
+                  lookups.personnel.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setBulkAssignUserId(p.id)}
+                      className={`w-full text-left px-3 py-2 text-sm font-semibold transition-colors ${
+                        bulkAssignUserId === p.id
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-800 hover:bg-blue-50'
+                      }`}
+                    >
+                      {p.fullName}
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="flex flex-col gap-2 sm:w-56 shrink-0">
+                <select
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-slate-800 bg-white"
+                  value={bulkAssignUserId}
+                  onChange={(e) => setBulkAssignUserId(e.target.value)}
+                >
+                  <option value="">Ekip Seçiniz</option>
+                  {lookups.personnel.map((p) => (
+                    <option key={p.id} value={p.id}>{p.fullName}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleBulkAssign}
+                  disabled={isBulkAssigning || !bulkAssignUserId}
+                  className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-colors"
+                >
+                  {isBulkAssigning ? 'Atanıyor...' : 'İşi Ata'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -923,6 +1024,7 @@ export default function WorkOrders() {
                           {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
+                      {isSuperAdmin && (
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Atanan Sahacı</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.assignedToUserId} onChange={(e) => setEditFormData({ ...editFormData, assignedToUserId: e.target.value })}>
@@ -930,6 +1032,7 @@ export default function WorkOrders() {
                           {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
+                      )}
                     </div>
                   </div>
                   <div className="col-span-2 p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
@@ -963,7 +1066,7 @@ export default function WorkOrders() {
                 </div>
               )}
 
-              {!isEditingDetail && (
+              {!isEditingDetail && isSuperAdmin && (
                 <div className="col-span-2 bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-3">
                   <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wider">Sahacı Ata / Değiştir</label>
                   <div className="flex gap-2 items-center">
