@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import logoImg from '../assets/logo.png';
+import { saveAuthProfileFromLogin, saveAuthProfileFromMeResponse } from '../utils/authSession';
 
 interface AxiosErrorResponse {
   response?: {
@@ -32,6 +33,19 @@ export default function Login() {
 
       // 🚀 YENİ NESİL KORUMA: JWT Token kaydediliyor
       localStorage.setItem('token', response.data.token);
+      saveAuthProfileFromLogin({
+        userId: response.data.userId,
+        username: response.data.username,
+        fullName: response.data.fullName,
+        roles: response.data.roles ?? [],
+      });
+
+      try {
+        const meRes = await api.get('/users/me');
+        saveAuthProfileFromMeResponse(meRes.data);
+      } catch {
+        /* JWT + login yanıtı yeterli; profil sonraki istekte güncellenir */
+      }
       
       // 🚀 GERİYE DÖNÜK UYUMLULUK FIX: Eski sayfaların login'e fırlatmasını engellemek için set ediyoruz!
       localStorage.setItem('isAuthenticated', 'true');
@@ -74,7 +88,7 @@ export default function Login() {
               required
               autoComplete="username" 
               className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
-              placeholder="admin@theobuz.com"
+              placeholder="ornek@sirket.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />

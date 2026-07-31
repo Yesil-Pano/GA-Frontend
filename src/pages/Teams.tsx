@@ -5,6 +5,7 @@ import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
+import { isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 
 interface TeamMemberData {
@@ -50,11 +51,24 @@ interface AssignedWorkOrder {
   type: string;
   plannedDate: string;
   assignedToUserId: string | null;
+  isPeriodic?: boolean;
+  parentWorkOrderId?: string | null;
+}
+
+interface PeriodicOccurrence {
+  id: string;
+  periodLabel: string | null;
+  startDate: string;
+  endDate: string;
+  status: string;
+  assignedToUserId: string | null;
+  assignedToUserName: string;
 }
 
 interface ProjectLookup {
   id: string;
   name: string;
+  tenantId?: string;
 }
 
 interface TenantLookup {
@@ -116,39 +130,59 @@ export default function Teams() {
   const [teamDocuments, setTeamDocuments] = useState<TeamDocumentItem[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
 
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-  if (token) {
-    try {
-      const base64Url = token.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const payload = JSON.parse(window.atob(base64));
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-    } catch (e) {
-      console.error(e);
-    }
-  }
+  const [periodicModalOpen, setPeriodicModalOpen] = useState(false);
+  const [periodicJob, setPeriodicJob] = useState<AssignedWorkOrder | null>(null);
+  const [periodicOccurrences, setPeriodicOccurrences] = useState<PeriodicOccurrence[]>([]);
+  const [periodicLoading, setPeriodicLoading] = useState(false);
+  const [reassignByOccurrence, setReassignByOccurrence] = useState<Record<string, string>>({});
+  const [reassigningOccurrenceId, setReassigningOccurrenceId] = useState<string | null>(null);
+
+  const isSuperAdminUser = isSuperAdmin();
 
   const reloadDataForSubmit = useCallback(async () => {
     try {
       const [teamsRes, ordersRes, lookupsRes] = await Promise.all([
         api.get('/teams'),
         api.get('/workorders'),
-        api.get('/teams/lookups')
+        api.get('/teams/lookups', {
+          params: isSuperAdminUser && formData.tenantId ? { tenantIdFilter: formData.tenantId } : undefined,
+        }),
       ]);
 
       setTeams(teamsRes.data);
       setAllWorkOrders(ordersRes.data);
       setProjects(lookupsRes.data);
 
-      if (isSuperAdmin) {
+      if (isSuperAdminUser) {
         const tenantsRes = await api.get('/superadmin/tenants');
         setGlobalTenants(tenantsRes.data);
       }
     } catch (error) {
       console.error("Veri yenilenirken hata:", error);
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdminUser, formData.tenantId]);
+
+  const loadProjectsForCreate = useCallback(async (tenantId?: string) => {
+    try {
+      const { data } = await api.get('/teams/lookups', {
+        params: tenantId ? { tenantIdFilter: tenantId } : undefined,
+      });
+      setProjects(data);
+    } catch (error) {
+      console.error('Proje listesi yüklenemedi:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isFormOpen || !isSuperAdminUser) return;
+    if (!formData.tenantId) {
+      setProjects([]);
+      setSelectedProjectIds([]);
+      return;
+    }
+    void loadProjectsForCreate(formData.tenantId);
+    setSelectedProjectIds([]);
+  }, [isFormOpen, isSuperAdminUser, formData.tenantId, loadProjectsForCreate]);
 
   useEffect(() => {
     let isMounted = true;
@@ -163,7 +197,7 @@ export default function Teams() {
         ]);
 
         let tenantList: TenantLookup[] = [];
-        if (isSuperAdmin) {
+        if (isSuperAdminUser) {
           const tenantsRes = await api.get('/superadmin/tenants');
           tenantList = tenantsRes.data;
         }
@@ -184,18 +218,27 @@ export default function Teams() {
 
     initPageData();
     return () => { isMounted = false; };
-  }, [isSuperAdmin, partnerKey]);
+  }, [isSuperAdminUser, partnerKey]);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+    if (isSuperAdminUser && !formData.tenantId) {
+      alert('Lütfen hedef firma seçin.');
+      return;
+    }
+    if (selectedProjectIds.length === 0) {
+      alert('En az bir proje seçmelisiniz.');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await api.post('/teams', {
         ...formData,
+        tenantId: isSuperAdminUser ? formData.tenantId : undefined,
         latitude: formData.lat,
         longitude: formData.lng,
-        projectIds: selectedProjectIds
+        projectIds: selectedProjectIds,
       });
       setIsFormOpen(false);
       setFormData({ name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', address: '', city: '', district: '', tenantId: '', lat: 39.92077, lng: 32.85411 });
@@ -252,7 +295,7 @@ export default function Teams() {
   const handleDeleteTeam = async () => {
     if (!selectedTeam) return;
     const confirmed = window.confirm(
-      `"${selectedTeam.name}" ekibini silmek istediğinize emin misiniz?\n\nAçık iş emirleri (Bekliyor / Devam Ediyor) Atanmamış'a çekilecek. Tamamlanan işler silinmez.`,
+      `"${selectedTeam.name}" ekibini silmek istediğinize emin misiniz?\n\nAçık iş emirleri (Devam Ediyor) Atanmamış'a çekilecek. Tamamlanan işler silinmez.`,
     );
     if (!confirmed) return;
 
@@ -304,7 +347,7 @@ export default function Teams() {
   );
 
   const handleWithdrawJob = async (jobId: string) => {
-    if (!isSuperAdmin) {
+    if (!isSuperAdminUser) {
       alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
       return;
     }
@@ -322,6 +365,46 @@ export default function Teams() {
     } catch (error) {
       console.error(error);
       alert('İş emri geri çekilemedi.');
+    }
+  };
+
+  const openPeriodicModal = async (job: AssignedWorkOrder) => {
+    if (!isSuperAdminUser) return;
+    setPeriodicJob(job);
+    setPeriodicModalOpen(true);
+    setPeriodicLoading(true);
+    setPeriodicOccurrences([]);
+    try {
+      const templateId = job.isPeriodic ? job.id : (job.parentWorkOrderId ?? job.id);
+      const { data } = await api.get<{ occurrences: PeriodicOccurrence[] }>(
+        `/workorders/${templateId}/occurrences`,
+      );
+      setPeriodicOccurrences(data.occurrences ?? []);
+    } catch (error) {
+      console.error(error);
+      alert('Periyodik dönemler yüklenemedi.');
+    } finally {
+      setPeriodicLoading(false);
+    }
+  };
+
+  const handleReassignOccurrence = async (occurrenceId: string) => {
+    const userId = reassignByOccurrence[occurrenceId];
+    if (!userId) {
+      alert('Yeni ekip üyesi seçin.');
+      return;
+    }
+    setReassigningOccurrenceId(occurrenceId);
+    try {
+      await api.post(`/workorders/${occurrenceId}/reassign`, { assignedToUserId: userId });
+      await reloadDataForSubmit();
+      if (periodicJob) await openPeriodicModal(periodicJob);
+      alert('Dönem ataması güncellendi.');
+    } catch (error) {
+      console.error(error);
+      alert('Atama güncellenemedi.');
+    } finally {
+      setReassigningOccurrenceId(null);
     }
   };
 
@@ -615,7 +698,7 @@ export default function Teams() {
             </div>
         
             <form onSubmit={handleCreateSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar text-sm">
-          {isSuperAdmin && (
+          {isSuperAdminUser && (
             <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-200 mb-2 animate-fadeIn">
               <label className="block text-xs font-bold text-orange-800 mb-1 uppercase tracking-wider">🏢 Hedef Firma Seçiniz (Super Admin Yetkisi)</label>
               <select required className="w-full border border-orange-300 rounded-lg p-2.5 bg-white text-xs font-bold focus:ring-2 focus:ring-brand-orange outline-none" value={formData.tenantId} onChange={e => setFormData({...formData, tenantId: e.target.value})}>
@@ -654,14 +737,20 @@ export default function Teams() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Bağlı Olacağı Projeler</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Bağlı Olacağı Projeler *</label>
             <div className="w-full border border-slate-300 rounded-xl p-3 bg-slate-50 max-h-40 overflow-y-auto space-y-2.5 shadow-inner">
-              {projects.map((proj) => (
+              {isSuperAdminUser && !formData.tenantId ? (
+                <p className="text-[11px] text-slate-400 font-medium">Önce hedef firma seçin.</p>
+              ) : projects.length === 0 ? (
+                <p className="text-[11px] text-slate-400 font-medium">Bu firma için seçilebilir proje bulunamadı.</p>
+              ) : (
+              projects.map((proj) => (
                 <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-slate-700">
                   <input type="checkbox" className="w-4 h-4 rounded text-brand-orange border-slate-300" checked={selectedProjectIds.includes(proj.id)} onChange={() => setSelectedProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
                   <span>{proj.name}</span>
                 </label>
-              ))}
+              ))
+              )}
             </div>
           </div>
 
@@ -776,7 +865,7 @@ export default function Teams() {
                       {/* Sol: Yetki Belgesi */}
                       <div>
                         <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Yetki Belgesi</label>
-                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-[108px]">
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-27">
                           {selectedTeam.hasAuthorizationDocument ? (
                             <>
                               <p className="text-[11px] font-semibold text-slate-700 truncate" title={selectedTeam.authorizationDocumentFileName || undefined}>
@@ -822,7 +911,7 @@ export default function Teams() {
                       {/* Sağ: Personel Evrak Bilgisi */}
                       <div>
                         <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Personel Evrak Bilgisi</label>
-                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-[108px]">
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2 min-h-27">
                           <p className="text-[11px] font-semibold text-slate-700">
                             {(selectedTeam.personnelDocumentCount ?? 0)} / 10 dosya
                           </p>
@@ -890,7 +979,16 @@ export default function Teams() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[10px] text-slate-400 font-semibold bg-white border border-slate-200 rounded px-1.5 py-0.5">{job.status}</span>
-                          {isSuperAdmin && (
+                          {isSuperAdminUser && (job.isPeriodic || job.parentWorkOrderId) && (
+                            <button
+                              type="button"
+                              onClick={() => openPeriodicModal(job)}
+                              className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg hover:bg-blue-100"
+                            >
+                              Dönemler
+                            </button>
+                          )}
+                          {isSuperAdminUser && (
                           <button
                             type="button"
                             onClick={() => handleWithdrawJob(job.id)}
@@ -936,7 +1034,7 @@ export default function Teams() {
             className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-start justify-between gap-4">
+            <div className="px-6 py-5 border-b border-slate-100 bg-linear-to-r from-slate-50 to-white flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Evrak Yönetimi</p>
                 <h2 className="text-lg font-bold text-brand-navy truncate">{selectedTeam.name}</h2>
@@ -1022,7 +1120,7 @@ export default function Teams() {
                       {filtered.map((doc) => (
                         <div
                           key={doc.id}
-                          className="group relative rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm hover:shadow-md hover:border-brand-orange/40 transition"
+                          className="group relative rounded-2xl border border-slate-200 bg-linear-to-br from-white to-slate-50 p-4 shadow-sm hover:shadow-md hover:border-brand-orange/40 transition"
                         >
                           <div className="flex items-start gap-3">
                             <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-inner">
@@ -1082,6 +1180,64 @@ export default function Teams() {
                 type="button"
                 onClick={() => setIsDocsModalOpen(false)}
                 className="bg-slate-800 text-white font-bold px-6 py-2.5 rounded-xl hover:bg-slate-900 transition"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {periodicModalOpen && periodicJob && (
+        <ModalOverlay className="animate-fadeIn">
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-brand-navy">Periyodik Dönem Atamaları</h3>
+              <p className="text-sm text-slate-500 mt-1">{periodicJob.customerName} — {periodicJob.title}</p>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 space-y-3">
+              {periodicLoading ? (
+                <p className="text-center text-slate-400 py-8">Dönemler yükleniyor...</p>
+              ) : periodicOccurrences.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">Henüz üretilmiş dönem yok.</p>
+              ) : (
+                periodicOccurrences.map((occ) => (
+                  <div key={occ.id} className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-wrap gap-2 items-center">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm text-brand-navy">{occ.periodLabel ?? occ.startDate}</p>
+                      <p className="text-[11px] text-slate-500">{occ.startDate} → {occ.endDate} · {occ.status}</p>
+                      <p className="text-[11px] text-slate-600">Atanan: {occ.assignedToUserName}</p>
+                    </div>
+                    <select
+                      className="border border-slate-300 rounded-lg p-2 text-xs font-semibold"
+                      value={reassignByOccurrence[occ.id] ?? ''}
+                      onChange={(e) => setReassignByOccurrence((prev) => ({ ...prev, [occ.id]: e.target.value }))}
+                    >
+                      <option value="">Yeni ekip</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={reassigningOccurrenceId === occ.id}
+                      onClick={() => handleReassignOccurrence(occ.id)}
+                      className="text-xs font-bold bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {reassigningOccurrenceId === occ.id ? '...' : 'Ata'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => { setPeriodicModalOpen(false); setPeriodicJob(null); }}
+                className="bg-slate-700 text-white font-bold px-5 py-2 rounded-xl"
               >
                 Kapat
               </button>

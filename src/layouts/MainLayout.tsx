@@ -18,6 +18,13 @@ import {
   type PartnerKey,
   type PartnerOption,
 } from '../utils/partners';
+import {
+  clearAuthSession,
+  getAuthProfile,
+  getJwtTenantId,
+  isSuperAdmin,
+  saveAuthProfileFromMeResponse,
+} from '../utils/authSession';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
   <div className="flex items-center h-20 border-b border-brand-navy-light px-5 overflow-hidden whitespace-nowrap">
@@ -61,21 +68,11 @@ export default function MainLayout() {
   const [isListPanelHidden, setIsListPanelHidden] = useState(false);
   const [listPanelPath, setListPanelPath] = useState(location.pathname);
 
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-  let jwtTenantId: string | null = null;
-  if (token) {
-    try {
-      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-      jwtTenantId = typeof payload.TenantId === 'string' ? payload.TenantId : null;
-    } catch (e) {
-      console.error('Super Admin yetki mührü çözülemedi:', e);
-    }
-  }
+  const isSuperAdminUser = isSuperAdmin();
+  const jwtTenantId = getJwtTenantId();
 
   /** SuperAdmin: sol menü seçimi. Tenant kullanıcı: kendi firması kilitli (seçici yok). */
-  const lockedTenantPartner = !isSuperAdmin ? getPartnerByTenantId(jwtTenantId) : null;
+  const lockedTenantPartner = !isSuperAdminUser ? getPartnerByTenantId(jwtTenantId) : null;
   const [selectedPartner, setSelectedPartner] = useState<PartnerOption>(() =>
     getPartnerByKey(getStoredPartnerKey()),
   );
@@ -91,6 +88,13 @@ export default function MainLayout() {
     } catch (error) {
       console.error('Bildirimler alınamadı:', error);
     }
+  }, []);
+
+  useEffect(() => {
+    if (getAuthProfile()) return;
+    api.get('/users/me')
+      .then(({ data }) => saveAuthProfileFromMeResponse(data))
+      .catch(() => { /* ignore */ });
   }, []);
 
   useEffect(() => {
@@ -262,14 +266,13 @@ export default function MainLayout() {
   ];
 
   const authorizedNavItems = [...navItems];
-  if (isSuperAdmin) {
+  if (isSuperAdminUser) {
+    authorizedNavItems.push({ path: '/users', label: 'Kullanıcılar', icon: '👤' });
     authorizedNavItems.push({ path: '/admin-panel', label: 'Sistem Yönetimi', icon: '🛠️' });
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('isAuthenticated');
+    clearAuthSession();
     navigate('/login', { replace: true });
   };
 
@@ -318,7 +321,7 @@ export default function MainLayout() {
       >
         <Logo isExpanded={isMenuOpen} />
 
-        {isSuperAdmin && (
+        {isSuperAdminUser && (
           <div className="mt-4 px-3 shrink-0 relative">
             <button
               onClick={() => isMenuOpen && setIsPartnerDropdownOpen(!isPartnerDropdownOpen)}

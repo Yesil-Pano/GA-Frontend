@@ -58,7 +58,6 @@ const PRIORITIES = ['Düşük', 'Orta', 'Acil'];
 const COMPLETION_TYPES = [
   'Tamamlandı',
   'İptal Edildi',
-  'Bekliyor',
   'Devam Ediyor',
   'Atanmamış',
   'Atanmış',

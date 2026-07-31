@@ -11,6 +11,7 @@ import {
   LogOut,
   MessageCircle,
 } from 'lucide-react';
+import { clearAuthSession, isSuperAdmin } from '../utils/authSession';
 
 interface MenuItem {
   name: string;
@@ -20,12 +21,13 @@ interface MenuItem {
 
 const Sidebar: React.FC = () => {
   const navigate = useNavigate();
+  const superAdmin = isSuperAdmin();
 
   const menuItems: MenuItem[] = [
     { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={20} /> },
     { name: 'İş Emirleri', path: '/work-orders', icon: <Briefcase size={20} /> },
     { name: 'Harita / Konumlar', path: '/map', icon: <MapPin size={20} /> },
-    { name: 'Kullanıcılar', path: '/users', icon: <Users size={20} /> },
+    ...(superAdmin ? [{ name: 'Kullanıcılar', path: '/users', icon: <Users size={20} /> }] : []),
     { name: 'Ayarlar', path: '/settings', icon: <Settings size={20} /> },
     { name: 'Takımlar', path: '/teams', icon: <Briefcase size={20} /> },
     { name: 'Anketler', path: '/surveys', icon: <Briefcase size={20} /> },
@@ -34,8 +36,7 @@ const Sidebar: React.FC = () => {
   ];
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearAuthSession();
     navigate('/login');
   };
 

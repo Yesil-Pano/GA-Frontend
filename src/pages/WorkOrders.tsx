@@ -6,6 +6,7 @@ import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
 import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '../utils/dateTime';
+import { isSuperAdmin, saveAuthProfileFromMeResponse } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 
 interface WorkOrderData {
@@ -80,20 +81,14 @@ interface LookupData {
 }
 
 export default function WorkOrders() {
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-  if (token) {
-    try {
-      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-    } catch {
-      /* ignore */
-    }
-  }
+  const isSuperAdminUser = isSuperAdmin();
 
-  const [filter, setFilter] = useState(isSuperAdmin ? 'Atanmamış' : 'Tümü');
+  const [filter, setFilter] = useState(isSuperAdminUser ? 'Atanmamış' : 'Tümü');
   const [bulkAssignUserId, setBulkAssignUserId] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
+  const [canViewIsgPhotos, setCanViewIsgPhotos] = useState(true);
+  const [canViewOperationPhotos, setCanViewOperationPhotos] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [orders, setOrders] = useState<WorkOrderData[]>([]);
   
@@ -380,7 +375,7 @@ export default function WorkOrders() {
 
   const handleAssign = async () => {
     if (!selectedOrder) return;
-    if (!isSuperAdmin) {
+    if (!isSuperAdminUser) {
       alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
       return;
     }
@@ -441,7 +436,7 @@ export default function WorkOrders() {
   };
 
   const handleBulkAssign = async () => {
-    if (!isSuperAdmin) {
+    if (!isSuperAdminUser) {
       alert('İş emri ataması yalnızca Super Admin tarafından yapılabilir.');
       return;
     }
@@ -499,6 +494,34 @@ export default function WorkOrders() {
     }
   };
 
+  const handlePurgeAll = async () => {
+    const typed = window.prompt(
+      'TÜM iş emirleri silinecek (yalnızca WorkOrders). Onaylamak için CONFIRM_PURGE_ALL yazın:',
+    );
+    if (typed !== 'CONFIRM_PURGE_ALL') return;
+    setIsPurging(true);
+    try {
+      const { data } = await api.post<{ count: number; message: string }>('/workorders/purge-all', {
+        confirm: 'CONFIRM_PURGE_ALL',
+      });
+      setSelectedOrders([]);
+      setOrders([]);
+      await refreshMapData();
+      alert(data.message ?? `${data.count} iş emri silindi.`);
+    } catch (error) {
+      console.error(error);
+      alert('Toplu temizlik başarısız.');
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
+  const visiblePhotoCategories = (['ISG', 'OPERASYON', 'DIGER'] as const).filter((category) => {
+    if (category === 'ISG') return canViewIsgPhotos;
+    if (category === 'OPERASYON') return canViewOperationPhotos;
+    return canViewIsgPhotos || canViewOperationPhotos;
+  });
+
   const handleDeletePhoto = async (photoId: string) => {
     if (!window.confirm('Bu fotoğraf silinsin mi?')) return;
     try {
@@ -520,6 +543,16 @@ export default function WorkOrders() {
   };
 
   useEffect(() => () => revokePhotoUrls(), []);
+
+  useEffect(() => {
+    api.get('/users/me')
+      .then(({ data }) => {
+        saveAuthProfileFromMeResponse(data);
+        if (typeof data.canViewIsgPhotos === 'boolean') setCanViewIsgPhotos(data.canViewIsgPhotos);
+        if (typeof data.canViewOperationPhotos === 'boolean') setCanViewOperationPhotos(data.canViewOperationPhotos);
+      })
+      .catch(() => { /* ignore */ });
+  }, []);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -647,7 +680,19 @@ export default function WorkOrders() {
   return (
     <div className="h-full flex flex-col p-4 sm:p-6 bg-slate-50 relative overflow-hidden min-w-0">
       
-      <h1 className="text-2xl font-extrabold text-brand-navy mb-4">İş Emirleri</h1>
+      <h1 className="text-2xl font-extrabold text-brand-navy mb-4 flex items-center justify-between gap-3">
+        <span>İş Emirleri</span>
+        {isSuperAdminUser && (
+          <button
+            type="button"
+            onClick={handlePurgeAll}
+            disabled={isPurging}
+            className="text-xs font-bold bg-rose-700 hover:bg-rose-800 text-white px-3 py-2 rounded-lg disabled:opacity-60"
+          >
+            {isPurging ? 'Siliniyor...' : 'Tüm İş Emirlerini Temizle'}
+          </button>
+        )}
+      </h1>
 
       <div className="w-full min-w-0 bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4 space-y-3 overflow-hidden">
         <input
@@ -664,7 +709,6 @@ export default function WorkOrders() {
             className="min-w-0 flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
           >
             <option value="Tümü">Tüm İşler</option>
-            <option value="Bekliyor">Bekliyor</option>
             <option value="Devam Ediyor">Devam Ediyor</option>
             <option value="Tamamlanan">Tamamlanan</option>
             <option value="İptal Edilen">İptal Edilen</option>
@@ -682,48 +726,26 @@ export default function WorkOrders() {
               <button type="button" onClick={handleBulkDelete} className="bg-rose-500 hover:bg-rose-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">🗑 Toplu Sil</button>
             </div>
           </div>
-          {isSuperAdmin && (
+          {isSuperAdminUser && (
             <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-white/10 rounded-lg p-3">
-              <div className="flex-1 max-h-40 overflow-y-auto bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
-                {lookups.personnel.length === 0 ? (
-                  <p className="text-xs text-slate-500 p-3">Ekip listesi yüklenemedi.</p>
-                ) : (
-                  lookups.personnel.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setBulkAssignUserId(p.id)}
-                      className={`w-full text-left px-3 py-2 text-sm font-semibold transition-colors ${
-                        bulkAssignUserId === p.id
-                          ? 'bg-blue-600 text-white'
-                          : 'text-slate-800 hover:bg-blue-50'
-                      }`}
-                    >
-                      {p.fullName}
-                    </button>
-                  ))
-                )}
-              </div>
-              <div className="flex flex-col gap-2 sm:w-56 shrink-0">
-                <select
-                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-slate-800 bg-white"
-                  value={bulkAssignUserId}
-                  onChange={(e) => setBulkAssignUserId(e.target.value)}
-                >
-                  <option value="">Ekip Seçiniz</option>
-                  {lookups.personnel.map((p) => (
-                    <option key={p.id} value={p.id}>{p.fullName}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleBulkAssign}
-                  disabled={isBulkAssigning || !bulkAssignUserId}
-                  className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-colors"
-                >
-                  {isBulkAssigning ? 'Atanıyor...' : 'İşi Ata'}
-                </button>
-              </div>
+              <select
+                className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-slate-800 bg-white"
+                value={bulkAssignUserId}
+                onChange={(e) => setBulkAssignUserId(e.target.value)}
+              >
+                <option value="">Ekip Seçiniz</option>
+                {lookups.personnel.map((p) => (
+                  <option key={p.id} value={p.id}>{p.fullName}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleBulkAssign}
+                disabled={isBulkAssigning || !bulkAssignUserId}
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-colors sm:w-40 shrink-0"
+              >
+                {isBulkAssigning ? 'Atanıyor...' : 'İşi Ata'}
+              </button>
             </div>
           )}
         </div>
@@ -893,23 +915,23 @@ export default function WorkOrders() {
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label>
                 <input
-                  type={isEditingDetail && isSuperAdmin ? 'datetime-local' : 'text'}
-                  disabled={!(isEditingDetail && isSuperAdmin)}
-                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdmin ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail && isSuperAdmin ? editFormData.startDate : (formatTurkeyDateTime(selectedOrder.startDate) || '—')}
+                  type={isEditingDetail && isSuperAdminUser ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdminUser)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdminUser ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail && isSuperAdminUser ? editFormData.startDate : (formatTurkeyDateTime(selectedOrder.startDate) || '—')}
                   onChange={(e) => setEditFormData({ ...editFormData, startDate: e.target.value })}
-                  title={!isSuperAdmin ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
+                  title={!isSuperAdminUser ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
                 />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Bitiş</label>
                 <input
-                  type={isEditingDetail && isSuperAdmin ? 'datetime-local' : 'text'}
-                  disabled={!(isEditingDetail && isSuperAdmin)}
-                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdmin ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
-                  value={isEditingDetail && isSuperAdmin ? editFormData.endDate : (formatTurkeyDateTime(selectedOrder.endDate) || '—')}
+                  type={isEditingDetail && isSuperAdminUser ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdminUser)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdminUser ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail && isSuperAdminUser ? editFormData.endDate : (formatTurkeyDateTime(selectedOrder.endDate) || '—')}
                   onChange={(e) => setEditFormData({ ...editFormData, endDate: e.target.value })}
-                  title={!isSuperAdmin ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
+                  title={!isSuperAdminUser ? 'Planlanan tarihler yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
                 />
               </div>
               <div>
@@ -1024,7 +1046,7 @@ export default function WorkOrders() {
                           {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
-                      {isSuperAdmin && (
+                      {isSuperAdminUser && (
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Atanan Sahacı</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.assignedToUserId} onChange={(e) => setEditFormData({ ...editFormData, assignedToUserId: e.target.value })}>
@@ -1066,7 +1088,7 @@ export default function WorkOrders() {
                 </div>
               )}
 
-              {!isEditingDetail && isSuperAdmin && (
+              {!isEditingDetail && isSuperAdminUser && (
                 <div className="col-span-2 bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-3">
                   <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wider">Sahacı Ata / Değiştir</label>
                   <div className="flex gap-2 items-center">
@@ -1110,7 +1132,7 @@ export default function WorkOrders() {
               </div>
 
               <div className="col-span-2 space-y-4">
-                {(['ISG', 'OPERASYON', 'DIGER'] as const).map((category) => {
+                {visiblePhotoCategories.map((category) => {
                   const photos = orderPhotos.filter((p) => p.category === category);
                   if (loadingPhotos) return null;
                   if (category === 'DIGER' && photos.length === 0) return null;

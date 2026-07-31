@@ -5,6 +5,7 @@ import { Virtuoso } from 'react-virtuoso';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
+import { isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 
 interface StationData {
@@ -119,16 +120,7 @@ const StationListCard = memo(function StationListCard({
 
 export default function MapPage() {
   const navigate = useNavigate();
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-  if (token) {
-    try {
-      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-    } catch {
-      /* ignore */
-    }
-  }
+  const isSuperAdminUser = isSuperAdmin();
   const [searchTerm, setSearchTerm] = useState('');
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
@@ -300,7 +292,7 @@ export default function MapPage() {
             operationUserId: prev.operationUserId || mapped[0].id,
             openedByUserId: prev.openedByUserId || mapped[0].id,
             // Tenant asla atayamaz; Super Admin boş bırakabilir veya seçebilir
-            assignedToUserId: isSuperAdmin
+            assignedToUserId: isSuperAdminUser
               ? (prev.assignedToUserId || '')
               : '',
           }));
@@ -389,7 +381,7 @@ export default function MapPage() {
         endDate: new Date(bulkForm.endDate).toISOString(),
         operationUserId: bulkForm.operationUserId || null,
         openedByUserId: bulkForm.openedByUserId || null,
-        assignedToUserId: isSuperAdmin ? (bulkForm.assignedToUserId || null) : null,
+        assignedToUserId: isSuperAdminUser ? (bulkForm.assignedToUserId || null) : null,
         isPeriodic: bulkForm.isPeriodic,
         recurrenceInterval: bulkForm.isPeriodic ? bulkForm.recurrenceInterval : 'None',
       });
@@ -551,10 +543,10 @@ export default function MapPage() {
               </div>
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
-                <div className={`grid grid-cols-1 gap-3 ${isSuperAdmin ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                <div className={`grid grid-cols-1 gap-3 ${isSuperAdminUser ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                   <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
                   <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  {isSuperAdmin && (
+                  {isSuperAdminUser && (
                     <div>
                       <label className="block text-xs font-bold mb-1">İş Atanan Sahacı</label>
                       <select
@@ -569,7 +561,7 @@ export default function MapPage() {
                     </div>
                   )}
                 </div>
-                {!isSuperAdmin && (
+                {!isSuperAdminUser && (
                   <p className="text-[11px] text-slate-600 font-medium">
                     Sahacı ataması Super Admin tarafından yapılır. İş emirleri Atanmamış olarak açılır.
                   </p>

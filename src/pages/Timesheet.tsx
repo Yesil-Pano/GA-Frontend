@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 
 // --- GÜÇLÜ TİP SÖZLEŞMELERİ (INTERFACE) ---
@@ -43,16 +44,7 @@ interface LookupData {
 
 export default function Timesheet() {
   const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
-  const token = localStorage.getItem('token');
-  let isSuperAdmin = false;
-  if (token) {
-    try {
-      const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      isSuperAdmin = payload.email === 'admin@theobuz.com';
-    } catch {
-      /* ignore */
-    }
-  }
+  const isSuperAdminUser = isSuperAdmin();
   // Zaman ve Görünüm Kontrolleri
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [view, setView] = useState<'Month' | 'Week' | 'Day'>('Month');
@@ -92,7 +84,7 @@ export default function Timesheet() {
             title: w.title,
             customerName: w.customerName,
             priority: w.priority || 'Orta',
-            status: w.status || 'Bekliyor',
+            status: w.status === 'Bekliyor' ? 'Devam Ediyor' : (w.status || 'Devam Ediyor'),
             startDate: w.startDate || w.plannedDate || '',
             endDate: w.endDate || '',
             assignedToUserId: w.assignedToUserId,
@@ -118,7 +110,7 @@ export default function Timesheet() {
               ...prev,
               operationUserId: mappedPersonnel[0].id,
               openedByUserId: mappedPersonnel[0].id,
-              assignedToUserId: isSuperAdmin ? (prev.assignedToUserId || '') : '',
+              assignedToUserId: isSuperAdminUser ? (prev.assignedToUserId || '') : '',
             }));
           }
         }
@@ -281,7 +273,7 @@ export default function Timesheet() {
         startDate: new Date(formData.startDate).toISOString(), endDate: new Date(formData.endDate).toISOString(),
         latitude: Number(formData.lat), longitude: Number(formData.lng),
         operationUserId: formData.operationUserId || null, openedByUserId: formData.openedByUserId || null,
-        assignedToUserId: isSuperAdmin ? (formData.assignedToUserId || null) : null,
+        assignedToUserId: isSuperAdminUser ? (formData.assignedToUserId || null) : null,
         isPeriodic: formData.isPeriodic,
         recurrenceInterval: formData.isPeriodic ? formData.recurrenceInterval : 'None',
       });
@@ -291,7 +283,7 @@ export default function Timesheet() {
       const response = await api.get('/workorders');
       const rawOrders = Array.isArray(response.data) ? response.data : [];
       const refreshedOrders = rawOrders.map((w: BackendWorkOrderForCalendar) => ({
-        id: w.id, title: w.title, customerName: w.customerName, priority: w.priority || 'Orta', status: w.status || 'Bekliyor',
+        id: w.id, title: w.title, customerName: w.customerName, priority: w.priority || 'Orta', status: w.status === 'Bekliyor' ? 'Devam Ediyor' : (w.status || 'Devam Ediyor'),
         startDate: w.startDate || w.plannedDate || '', endDate: w.endDate || '', assignedToUserId: w.assignedToUserId, assignedToUserName: w.assignedToUserName
       }));
       setOrders(refreshedOrders);
@@ -514,7 +506,7 @@ export default function Timesheet() {
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
             <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            {isSuperAdmin ? (
+            {isSuperAdminUser ? (
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label>
                 <select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.assignedToUserId} onChange={e => setFormData({...formData, assignedToUserId: e.target.value})}>
