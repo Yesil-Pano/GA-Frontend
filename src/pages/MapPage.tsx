@@ -5,7 +5,7 @@ import { Virtuoso } from 'react-virtuoso';
 import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
-import { isSuperAdmin } from '../utils/authSession';
+import { isSuperAdmin, getAuthProfile } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 
 interface StationData {
@@ -55,11 +55,33 @@ const STATION_STATUS_FILTERS: { key: StationStatusFilter; label: string; active:
   { key: 'Bakım Dışı', label: 'Bakım Dışı', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
 ];
 
-const todayLocal = (h: number, m = 0) => {
+const SELECT_PLACEHOLDER = '';
+
+const nowLocal = () => {
   const n = new Date();
   const pad = (x: number) => String(x).padStart(2, '0');
-  return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}T${pad(h)}:${pad(m)}`;
+  return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}T${pad(n.getHours())}:${pad(n.getMinutes())}`;
 };
+
+const endOfDayLocal = () => {
+  const n = new Date();
+  const pad = (x: number) => String(x).padStart(2, '0');
+  return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}T18:00`;
+};
+
+const emptyStationForm = () => ({
+  name: '',
+  statusType: SELECT_PLACEHOLDER,
+  powerType: SELECT_PLACEHOLDER,
+  personnelName: '',
+  personnelPhone: '',
+  edas: SELECT_PLACEHOLDER,
+  address: '',
+  pointType: SELECT_PLACEHOLDER,
+  city: SELECT_PLACEHOLDER,
+  lat: 39.92,
+  lng: 32.85,
+});
 
 const StationListCard = memo(function StationListCard({
   station,
@@ -98,17 +120,17 @@ const StationListCard = memo(function StationListCard({
         onClick={(e) => e.stopPropagation()}
       />
       <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">📍 {station.name}</h3>
-          {partnerKey === 'all' && partner && partner.key !== 'all' && (
-            <span
-              className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white"
-              style={{ backgroundColor: partner.color }}
-            >
-              {partner.name}
-            </span>
-          )}
-        </div>
+        {partnerKey === 'all' && partner && partner.key !== 'all' && (
+          <span
+            className="mb-1.5 inline-block shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-extrabold text-white"
+            style={{ backgroundColor: partner.color }}
+          >
+            {partner.name}
+          </span>
+        )}
+        <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy break-words group-hover:text-brand-orange transition-colors">
+          📍 {station.name}
+        </h3>
         <div className="space-y-1 text-xs text-slate-600 font-medium">
           <div><span className="font-bold text-slate-400">İl:</span> {station.city}{station.district ? ` / ${station.district}` : ''} | <span className="font-bold text-slate-400">Güç:</span> {station.powerType}</div>
                   <div><span className="font-bold text-slate-400">Durum:</span> <span className={`font-bold ${station.statusType === 'Bakım Dışı' ? 'text-rose-600' : 'text-emerald-600'}`}>{station.statusType}</span></div>
@@ -132,6 +154,7 @@ export default function MapPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusTypeFilter, setStatusTypeFilter] = useState<StationStatusFilter>('Tümü');
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
+  const [officeUsers, setOfficeUsers] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
   const [workCategories, setWorkCategories] = useState<string[]>([
     'Arıza Bildirimi', 'YG İşletme Sorumluluğu Talebi', 'YG Bakım', 'AG Bakım',
@@ -248,10 +271,7 @@ export default function MapPage() {
     }
   };
 
-  const [formData, setFormData] = useState({
-    name: '', statusType: 'Bakıma Dahil', powerType: 'AC', personnelName: '', personnelPhone: '',
-    edas: EDAS_LIST[0], address: '', pointType: 'YG Abonelik', city: 'Ankara', lat: 39.92, lng: 32.85
-  });
+  const [formData, setFormData] = useState(emptyStationForm());
 
   const [bulkForm, setBulkForm] = useState({
     title: '{nokta} iş emri',
@@ -261,8 +281,8 @@ export default function MapPage() {
     priority: 'Orta',
     type: 'Arıza',
     category: 'Arıza Bildirimi',
-    startDate: todayLocal(9),
-    endDate: todayLocal(18),
+    startDate: nowLocal(),
+    endDate: endOfDayLocal(),
     operationUserId: '',
     openedByUserId: '',
     assignedToUserId: '',
@@ -274,6 +294,7 @@ export default function MapPage() {
   useEffect(() => {
     setLookupsLoaded(false);
     setPersonnel([]);
+    setOfficeUsers([]);
   }, [partnerKey]);
 
   // Lookups yalnızca toplu iş emri modalı açılınca — listeyi bloklamaz
@@ -285,25 +306,31 @@ export default function MapPage() {
       try {
         const { data: backendData } = await api.get('/workorders/lookups');
         if (cancelled) return;
-        const mapped = backendData?.teams
+        const mappedField = backendData?.teams
           ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
           : (backendData?.personnel ?? []);
-        setPersonnel(mapped);
+        const mappedOffice = (backendData?.officeUsers ?? []).map(
+          (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
+        );
+        setPersonnel(mappedField);
+        setOfficeUsers(mappedOffice);
         if (Array.isArray(backendData?.types) && backendData.types.length > 0) {
           setWorkTypes(backendData.types);
         }
         if (Array.isArray(backendData?.categories) && backendData.categories.length > 0) {
           setWorkCategories(backendData.categories);
         }
-        if (mapped.length > 0) {
+        const meId = getAuthProfile()?.userId;
+        const defaultOfficeId =
+          meId && mappedOffice.some((u: PersonnelLookup) => u.id === meId)
+            ? meId
+            : (mappedOffice[0]?.id ?? '');
+        if (mappedOffice.length > 0 || mappedField.length > 0) {
           setBulkForm((prev) => ({
             ...prev,
-            operationUserId: prev.operationUserId || mapped[0].id,
-            openedByUserId: prev.openedByUserId || mapped[0].id,
-            // Tenant asla atayamaz; Super Admin boş bırakabilir veya seçebilir
-            assignedToUserId: isSuperAdminUser
-              ? (prev.assignedToUserId || '')
-              : '',
+            operationUserId: prev.operationUserId || defaultOfficeId,
+            openedByUserId: prev.openedByUserId || defaultOfficeId,
+            assignedToUserId: isSuperAdminUser ? (prev.assignedToUserId || '') : '',
           }));
         }
         setLookupsLoaded(true);
@@ -360,12 +387,17 @@ export default function MapPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+    if (!formData.statusType || !formData.powerType || !formData.edas || !formData.pointType || !formData.city) {
+      alert('Lütfen tüm zorunlu seçim alanlarını doldurun (Seçiniz bırakmayın).');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await api.post('/stations', {
         ...formData, latitude: Number(formData.lat), longitude: Number(formData.lng)
       });
       setIsFormOpen(false);
+      setFormData(emptyStationForm());
       await refreshMapData?.();
     } catch (error) {
       console.error(error);
@@ -379,6 +411,10 @@ export default function MapPage() {
     e.preventDefault();
     if (selectedIds.length === 0) {
       alert('En az bir nokta seçin.');
+      return;
+    }
+    if (!bulkForm.operationUserId || !bulkForm.openedByUserId) {
+      alert('Operasyon Sorumlusu ve İş Açan Yetkili seçilmelidir.');
       return;
     }
     setIsSubmitting(true);
@@ -449,14 +485,14 @@ export default function MapPage() {
               type="button"
               disabled={selectedIds.length === 0}
               onClick={() => {
-                setBulkForm((p) => ({ ...p, startDate: todayLocal(9), endDate: todayLocal(18) }));
+                setBulkForm((p) => ({ ...p, startDate: nowLocal(), endDate: endOfDayLocal() }));
                 setIsBulkOpen(true);
               }}
               className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-40"
             >
               Toplu İş Emri ({selectedIds.length})
             </button>
-            <button type="button" onClick={() => setIsFormOpen(true)} className="px-3 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">
+            <button type="button" onClick={() => { setFormData(emptyStationForm()); setIsFormOpen(true); }} className="px-3 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">
               + Nokta Ekle
             </button>
           </div>
@@ -504,17 +540,17 @@ export default function MapPage() {
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar text-sm">
               <div><label className="block text-xs font-bold text-slate-700 mb-1">İstasyon Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option>Bakıma Dahil</option><option>Bakım Dışı</option></select></div>
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option>ACDC</option><option>AC</option><option>DC</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option value="">Seçiniz</option><option value="Bakıma Dahil">Bakıma Dahil</option><option value="Bakım Dışı">Bakım Dışı</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option value="">Seçiniz</option><option value="ACDC">ACDC</option><option value="AC">AC</option><option value="DC">DC</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">İlgili Personel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelName} onChange={e => setFormData({...formData, personnelName: e.target.value})} /></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Personel Tel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelPhone} onChange={e => setFormData({...formData, personnelPhone: e.target.value})} /></div>
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.edas} onChange={e => setFormData({...formData, edas: e.target.value})}>{EDAS_LIST.map((e, i) => <option key={i}>{e}</option>)}</select></div>
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">Nokta Tipi</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.pointType} onChange={e => setFormData({...formData, pointType: e.target.value})}><option>YG Abonelik</option><option>AG Abonelik</option><option>Süzme Sayaç</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.edas} onChange={e => setFormData({...formData, edas: e.target.value})}><option value="">Seçiniz</option>{EDAS_LIST.map((e, i) => <option key={i} value={e}>{e}</option>)}</select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">Nokta Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.pointType} onChange={e => setFormData({...formData, pointType: e.target.value})}><option value="">Seçiniz</option><option value="YG Abonelik">YG Abonelik</option><option value="AG Abonelik">AG Abonelik</option><option value="Süzme Sayaç">Süzme Sayaç</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-600 mb-1">Lat</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
                 <div><label className="block text-xs font-bold text-slate-600 mb-1">Lng</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
               </div>
               <div><label className="block text-xs font-bold text-slate-700 mb-1">Adres</label><textarea required rows={2} className="w-full border rounded-lg p-2.5" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
-              <div><label className="block text-xs font-bold text-slate-700 mb-1">İl</label><select className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})}>{CITIES.map((c, i) => <option key={i}>{c}</option>)}</select></div>
+              <div><label className="block text-xs font-bold text-slate-700 mb-1">İl</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})}><option value="">Seçiniz</option>{CITIES.map((c, i) => <option key={i} value={c}>{c}</option>)}</select></div>
               <div className="flex justify-end gap-3 pt-4 border-t">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-600 hover:bg-slate-50">İptal</button>
                 <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-xl disabled:opacity-50">{isSubmitting ? '...' : '✓ Kaydet'}</button>
@@ -573,8 +609,8 @@ export default function MapPage() {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
                 <div className={`grid grid-cols-1 gap-3 ${isSuperAdminUser ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>{personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
                   {isSuperAdminUser && (
                     <div>
                       <label className="block text-xs font-bold mb-1">İş Atanan Sahacı</label>
@@ -769,6 +805,8 @@ export default function MapPage() {
                     ...prev,
                     title: `${selectedStation.name} iş emri`,
                     address: selectedStation.address || '',
+                    startDate: nowLocal(),
+                    endDate: endOfDayLocal(),
                   }));
                   closeStationDetail();
                   setIsBulkOpen(true);

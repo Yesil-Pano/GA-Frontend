@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import ModalOverlay from '../components/ModalOverlay';
+import { formatTurkeyDate } from '../utils/dateTime';
 
 interface SurveyData {
   id: string;
@@ -232,7 +233,7 @@ export default function Surveys() {
                     <div>
                       <h4 className="font-bold text-brand-navy text-sm group-hover:text-brand-orange transition-colors">{survey.status}</h4>
                       <p className="text-[11px] text-slate-400 font-bold mt-0.5">{survey.title}</p>
-                      <span className="text-[10px] text-slate-400 block mt-1 font-medium">Tarih: {new Date(survey.createdAt).toLocaleDateString('tr-TR')}</span>
+                      <span className="text-[10px] text-slate-400 block mt-1 font-medium">Tarih: {formatTurkeyDate(survey.createdAt)}</span>
                     </div>
                   </div>
                   <span className="text-base bg-orange-50 p-1 rounded-lg border border-orange-100">📋</span>

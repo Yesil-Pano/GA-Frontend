@@ -24,7 +24,9 @@ import {
   getJwtTenantId,
   isSuperAdmin,
   saveAuthProfileFromMeResponse,
+  type AuthProfile,
 } from '../utils/authSession';
+import ModalOverlay from '../components/ModalOverlay';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
   <div className="flex items-center h-20 border-b border-brand-navy-light px-5 overflow-hidden whitespace-nowrap">
@@ -68,6 +70,13 @@ export default function MainLayout() {
   const [isListPanelHidden, setIsListPanelHidden] = useState(false);
   const [listPanelPath, setListPanelPath] = useState(location.pathname);
 
+  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(() => getAuthProfile());
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+
   const isSuperAdminUser = isSuperAdmin();
   const jwtTenantId = getJwtTenantId();
 
@@ -93,7 +102,10 @@ export default function MainLayout() {
   useEffect(() => {
     if (getAuthProfile()) return;
     api.get('/users/me')
-      .then(({ data }) => saveAuthProfileFromMeResponse(data))
+      .then(({ data }) => {
+        saveAuthProfileFromMeResponse(data);
+        setAuthProfile(getAuthProfile());
+      })
       .catch(() => { /* ignore */ });
   }, []);
 
@@ -274,6 +286,49 @@ export default function MainLayout() {
   const handleLogout = () => {
     clearAuthSession();
     navigate('/login', { replace: true });
+  };
+
+  const displayUserName =
+    authProfile?.fullName?.trim() ||
+    authProfile?.username?.trim() ||
+    authProfile?.email?.trim() ||
+    'Kullanıcı';
+
+  const handleOpenPasswordModal = () => {
+    setIsProfileMenuOpen(false);
+    setPasswordForm({ current: '', next: '', confirm: '' });
+    setPasswordError('');
+    setIsPasswordModalOpen(true);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    if (passwordForm.next.length < 6) {
+      setPasswordError('Yeni şifre en az 6 karakter olmalıdır.');
+      return;
+    }
+    if (passwordForm.next !== passwordForm.confirm) {
+      setPasswordError('Yeni şifreler eşleşmiyor.');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await api.post('/users/me/change-password', {
+        currentPassword: passwordForm.current,
+        newPassword: passwordForm.next,
+      });
+      setIsPasswordModalOpen(false);
+      setPasswordForm({ current: '', next: '', confirm: '' });
+      alert('Şifreniz güncellendi.');
+    } catch (err: unknown) {
+      const data = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { message?: string } } }).response?.data
+        : undefined;
+      setPasswordError(data?.message || 'Şifre değiştirilemedi.');
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const isWorkOrdersPage = location.pathname.startsWith('/work-orders');
@@ -464,6 +519,28 @@ export default function MainLayout() {
               </div>
             )}
           </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsProfileMenuOpen((prev) => !prev)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl transition shadow-sm border border-slate-200 text-sm font-bold text-brand-navy max-w-56"
+              title={displayUserName}
+            >
+              <span className="text-lg shrink-0">👤</span>
+              <span className="truncate">{displayUserName}</span>
+            </button>
+            {isProfileMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-100 text-xs animate-fadeIn">
+                <button
+                  type="button"
+                  onClick={handleOpenPasswordModal}
+                  className="w-full text-left px-4 py-3 hover:bg-slate-50 font-bold text-slate-700 transition-colors"
+                >
+                  🔒 Şifre Değiştir
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={handleLogout}
             className="text-sm font-bold px-5 py-2.5 text-rose-600 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition shadow-sm"
@@ -471,6 +548,79 @@ export default function MainLayout() {
             Çıkış Yap
           </button>
         </header>
+
+        {isPasswordModalOpen && (
+          <ModalOverlay>
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+              <div className="flex justify-between items-center px-6 py-4 border-b bg-slate-50">
+                <h2 className="text-base font-bold text-brand-navy">Şifre Değiştir</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordModalOpen(false)}
+                  className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2"
+                >
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleChangePassword} className="p-6 space-y-4 text-sm">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Mevcut Şifre</label>
+                  <input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    className="w-full border rounded-lg p-2.5"
+                    value={passwordForm.current}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Yeni Şifre</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    className="w-full border rounded-lg p-2.5"
+                    value={passwordForm.next}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Yeni Şifre (Tekrar)</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    className="w-full border rounded-lg p-2.5"
+                    value={passwordForm.confirm}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+                  />
+                </div>
+                {passwordError && (
+                  <p className="text-xs font-bold text-rose-600">{passwordError}</p>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsPasswordModalOpen(false)}
+                    className="flex-1 border rounded-xl py-2.5 font-bold hover:bg-slate-50"
+                  >
+                    İptal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="flex-1 bg-brand-orange text-brand-navy rounded-xl py-2.5 font-bold disabled:opacity-50"
+                  >
+                    {isChangingPassword ? 'Kaydediliyor...' : 'Kaydet'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </ModalOverlay>
+        )}
 
         <div className="flex-1 relative overflow-hidden bg-slate-50 z-0">
           {showMapBackground ? (
@@ -485,13 +635,11 @@ export default function MainLayout() {
               </div>
               {showSlatPanel && (
                 <div
-                  className={`absolute top-0 bottom-0 w-100 bg-white border-r border-slate-200 shadow-2xl z-20 overflow-hidden flex flex-col transition-[left,opacity] duration-300 ease-in-out ${
+                  className={`absolute top-0 bottom-0 z-20 flex w-full max-w-120 flex-col overflow-hidden border-r border-slate-200 bg-white shadow-2xl transition-[transform,opacity] duration-300 ease-in-out ${
                     isListPanelHidden
-                      ? '-left-100 opacity-0 pointer-events-none'
-                      : isMenuOpen
-                        ? 'left-44 opacity-100'
-                        : 'left-0 opacity-100'
-                  }`}
+                      ? '-translate-x-full opacity-0 pointer-events-none'
+                      : 'translate-x-0 opacity-100'
+                  } ${isMenuOpen ? 'left-44' : 'left-0'}`}
                 >
                   <div className="flex-1 overflow-y-auto">
                     <Outlet context={outletContextValue} />

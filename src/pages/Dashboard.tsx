@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 
 interface DashboardStats {
   totalCount: number;
@@ -84,7 +85,7 @@ export default function Dashboard() {
       <div className="mb-6 flex items-center gap-2">
         <h1 className="text-xl font-bold text-brand-navy">Dashboard - Süreç Takip Raporu</h1>
         {generatedAt && (
-          <span className="text-[10px] text-slate-400 font-semibold ml-auto">Güncelleme: {generatedAt}</span>
+          <span className="text-[10px] text-slate-400 font-semibold ml-auto">Güncelleme: {formatTurkeyDateTime(generatedAt)}</span>
         )}
       </div>
 

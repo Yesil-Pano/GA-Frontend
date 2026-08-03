@@ -151,6 +151,7 @@ export default function Teams() {
   const [selectedTeam, setSelectedTeam] = useState<TeamMemberData | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'jobs'>('details');
   const [assignedJobStatusFilter, setAssignedJobStatusFilter] = useState<AssignedJobStatusFilter>('Tümü');
+  const [assignedJobSearch, setAssignedJobSearch] = useState('');
   const [isEditingModal, setIsEditingModal] = useState(false); 
 
   // 🚀 FORM STATE'İNE YENİ ALANLAR EKLENDİ
@@ -309,6 +310,10 @@ export default function Teams() {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTeam) return;
+    if (editProjectIds.length === 0) {
+      alert('En az bir proje seçmelisiniz.');
+      return;
+    }
     setIsSubmitting(true);
     try {
       const { password, lat, lng, ...rest } = editFormData;
@@ -343,6 +348,30 @@ export default function Teams() {
     } finally {
       setRefreshingLocations(false);
     }
+  };
+
+  const openTeamDetail = (team: TeamMemberData) => {
+    setSelectedTeam(team);
+    setEditFormData({
+      name: team.name,
+      username: team.username,
+      email: team.email,
+      password: '',
+      phone: team.phone,
+      teamLeader: team.teamLeader === '-' ? '' : team.teamLeader,
+      plate: team.plate === '-' ? '' : team.plate,
+      address: team.address === '-' ? '' : team.address,
+      city: team.city === '-' ? '' : team.city,
+      district: team.district === '-' ? '' : team.district,
+      lat: team.position[0] || 39.92077,
+      lng: team.position[1] || 32.85411,
+    });
+    setEditProjectIds(team.projectIds || []);
+    setActiveTab('details');
+    setAssignedJobStatusFilter('Tümü');
+    setAssignedJobSearch('');
+    setIsEditingModal(false);
+    setIsDetailModalOpen(true);
   };
 
   const handleDeleteTeam = async () => {
@@ -381,15 +410,15 @@ export default function Teams() {
     trIncludes(team.plate, searchTerm)
   );
 
-  /** Düzenleme: partner filtreli lookups + personelin mevcut atamaları */
-  const editProjectOptions = (() => {
+  /** Düzenleme: lookups + personelin mevcut atamaları (çoklu seçim) */
+  const editProjectOptions = useMemo(() => {
     const map = new Map<string, ProjectLookup>();
     for (const p of projects) map.set(p.id, p);
     for (const p of selectedTeam?.assignedProjects || []) {
       if (!map.has(p.id)) map.set(p.id, { id: p.id, name: p.name });
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-  })();
+  }, [projects, selectedTeam?.assignedProjects]);
 
   const teamAssignedJobsAll = useMemo(
     () =>
@@ -404,10 +433,17 @@ export default function Teams() {
     const filtered = teamAssignedJobsAll.filter((order) =>
       matchesAssignedJobStatusFilter(order.status, assignedJobStatusFilter),
     );
-    return [...filtered].sort(
+    const searched = assignedJobSearch.trim()
+      ? filtered.filter(
+          (order) =>
+            trIncludes(order.customerName, assignedJobSearch) ||
+            trIncludes(order.title, assignedJobSearch),
+        )
+      : filtered;
+    return [...searched].sort(
       (a, b) => assignedJobSortKey(a.status) - assignedJobSortKey(b.status),
     );
-  }, [teamAssignedJobsAll, assignedJobStatusFilter]);
+  }, [teamAssignedJobsAll, assignedJobStatusFilter, assignedJobSearch]);
 
   const handleWithdrawJob = async (jobId: string) => {
     if (!isSuperAdminUser) {
@@ -720,22 +756,22 @@ export default function Teams() {
               className="bg-white rounded-xl shadow-md border border-slate-200 border-l-[6px] p-4 cursor-pointer hover:shadow-lg transition relative group"
               style={{ borderLeftColor: accent }}
             >
-              <div className="flex justify-between items-start mb-2">
-                <label className="flex items-center gap-3 cursor-pointer min-w-0" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" className="ga-checkbox" />
-                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">{team.name}</span>
+              <div className="flex justify-between items-start mb-2 gap-2">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" className="ga-checkbox mt-0.5" />
+                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors break-words leading-snug">{team.name}</span>
                 </label>
                 {partnerKey === 'all' && partner && partner.key !== 'all' ? (
                   <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: partner.color }}>
                     {partner.name}
                   </span>
                 ) : (
-                  <span className="text-xl">📇</span>
+                  <span className="text-xl shrink-0">📇</span>
                 )}
               </div>
 
               <div className="space-y-1 text-xs text-slate-700 font-medium pl-7">
-                <div className="flex"><span className="w-28 text-slate-400 font-bold">Proje:</span><span className="truncate flex-1 font-bold text-slate-600" title={team.project}>{team.project}</span></div>
+                <div className="flex"><span className="w-28 text-slate-400 font-bold">Proje:</span><span className="flex-1 font-bold text-slate-600 break-words" title={team.project}>{team.project}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Araç Plakası:</span><span className="flex-1 font-bold text-slate-600">{team.plate || 'Atanmamış'}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Telefon Numarası:</span><span className="flex-1 font-bold text-slate-600">{team.phone}</span></div>
                 {/* 🚀 LİSTEDE İL VE İLÇE GÖSTERİMİ */}
@@ -753,29 +789,8 @@ export default function Teams() {
               <div className="flex justify-end mt-3 pt-2 border-t border-slate-100 pl-7">
                 <button 
                   onClick={(e) => {
-                    e.stopPropagation(); 
-                    setSelectedTeam(team);
-                    
-                    setEditFormData({
-                      name: team.name,
-                      username: team.username,
-                      email: team.email,
-                      password: '', 
-                      phone: team.phone,
-                      teamLeader: team.teamLeader === '-' ? '' : team.teamLeader,
-                      plate: team.plate === '-' ? '' : team.plate,
-                      address: team.address === '-' ? '' : team.address,
-                      city: team.city === '-' ? '' : team.city,
-                      district: team.district === '-' ? '' : team.district,
-                      lat: team.position[0] || 39.92077,
-                      lng: team.position[1] || 32.85411
-                    });
-                    setEditProjectIds(team.projectIds || []);
-
-                    setActiveTab('details');
-                    setAssignedJobStatusFilter('Tümü');
-                    setIsEditingModal(false); 
-                    setIsDetailModalOpen(true);
+                    e.stopPropagation();
+                    openTeamDetail(team);
                   }}
                   className="text-xs text-blue-600 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold shadow-sm"
                 >
@@ -837,7 +852,12 @@ export default function Teams() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Bağlı Olacağı Projeler *</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+              Bağlı Olacağı Projeler *
+              {selectedProjectIds.length > 0 && (
+                <span className="ml-2 normal-case text-slate-400 font-semibold">· {selectedProjectIds.length} seçili</span>
+              )}
+            </label>
             <div className="w-full border border-slate-300 rounded-xl p-3 bg-slate-50 max-h-40 overflow-y-auto space-y-2.5 shadow-inner">
               {isSuperAdminUser && !formData.tenantId ? (
                 <p className="text-[11px] text-slate-400 font-medium">Önce hedef firma seçin.</p>
@@ -1038,7 +1058,14 @@ export default function Teams() {
                     )}
 
                     <div className="col-span-2">
-                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">Bağlı Olduğu Projeler (Çoklu Seçim)</label>
+                      <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider mt-1">
+                        Bağlı Olduğu Projeler (Çoklu Seçim)
+                        {isEditingModal && (
+                          <span className="ml-2 normal-case text-slate-400 font-semibold">
+                            · {editProjectIds.length} seçili
+                          </span>
+                        )}
+                      </label>
                       {isEditingModal ? (
                         <div className="w-full border border-blue-400 rounded-xl p-3 bg-white max-h-36 overflow-y-auto space-y-2 shadow-inner">
                           {editProjectOptions.map((proj) => (
@@ -1068,6 +1095,16 @@ export default function Teams() {
 
               {activeTab === 'jobs' && (
                 <div className="space-y-3">
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Lokasyon / nokta / iş ara..."
+                      value={assignedJobSearch}
+                      onChange={(e) => setAssignedJobSearch(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg pl-10 pr-4 py-2 text-xs focus:ring-2 focus:ring-brand-orange outline-none"
+                    />
+                  </div>
                   <div className="flex flex-wrap gap-2 pb-1">
                     {ASSIGNED_JOB_STATUS_FILTERS.map((chip) => (
                       <button
@@ -1086,7 +1123,9 @@ export default function Teams() {
                     <div className="text-center py-10 text-slate-400 font-medium">
                       {teamAssignedJobsAll.length === 0
                         ? '📭 Bu ekip üyesine henüz atanmış bir iş emri bulunmuyor.'
-                        : 'Seçilen filtreye uygun iş emri bulunmuyor.'}
+                        : assignedJobSearch.trim()
+                          ? 'Arama kriterine uygun iş emri bulunmuyor.'
+                          : 'Seçilen filtreye uygun iş emri bulunmuyor.'}
                     </div>
                   ) : (
                     assignedJobs.map((job) => (
@@ -1253,7 +1292,7 @@ export default function Teams() {
                               </p>
                               <p className="text-[11px] text-slate-500 mt-1">
                                 {formatFileSize(doc.fileSize)}
-                                {doc.uploadedAt ? ` · ${doc.uploadedAt}` : ''}
+                                {doc.uploadedAt ? ` · ${formatTurkeyDateTime(doc.uploadedAt)}` : ''}
                               </p>
                             </div>
                           </div>
@@ -1343,7 +1382,7 @@ export default function Teams() {
                           {occ.status}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500">{occ.startDate} → {occ.endDate}</p>
+                      <p className="text-[11px] text-slate-500">{formatTurkeyDateTime(occ.startDate)} → {formatTurkeyDateTime(occ.endDate)}</p>
                       <p className="text-[11px] font-semibold text-slate-700">{occ.assignedToUserName}</p>
                       <div className="flex flex-wrap gap-1.5 sm:justify-end">
                         <select

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 
 interface PersonnelOption {
   id: string;
@@ -367,10 +368,10 @@ export default function Reports() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">{row.openedByUserName}</td>
                     <td className="px-4 py-3 text-slate-700">{row.assignedToUserName}</td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.startDate || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.startedAt || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{formatTurkeyDateTime(row.startDate) || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{formatTurkeyDateTime(row.startedAt) || '—'}</td>
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                      {row.cancelledAt || row.completedAt || '—'}
+                      {formatTurkeyDateTime(row.cancelledAt || row.completedAt) || '—'}
                     </td>
                     <td className="px-4 py-3 text-slate-700 font-semibold whitespace-nowrap">
                       {row.durationMinutes != null ? row.durationMinutes : '—'}

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 
 interface PeriodicOrder {
   id: string;
@@ -90,7 +91,7 @@ export default function Planning() {
                   </p>
                   <p className="text-[11px] text-emerald-700 font-semibold">
                     Sonraki otomatik açılış:{' '}
-                    {job.nextExecutionDate || 'Hesaplanmadı'}
+                    {formatTurkeyDateTime(job.nextExecutionDate) || 'Hesaplanmadı'}
                   </p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">

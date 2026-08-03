@@ -1,6 +1,6 @@
 // ga-frontend/src/pages/Users.tsx
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../services/api';
 import ModalOverlay from '../components/ModalOverlay';
 
@@ -50,6 +50,70 @@ const EMPTY_FORM: UserFormState = {
 };
 
 const SUPER_ADMIN_ROLE = 'SuperAdmin';
+const PAGE_SIZE = 20;
+
+type SortKey = 'fullName' | 'email' | 'username' | 'tenantName' | 'roles' | 'status';
+type SortDir = 'asc' | 'desc';
+type StatusFilter = 'all' | 'active' | 'inactive';
+
+function compareText(a: string, b: string, dir: SortDir): number {
+  const result = a.localeCompare(b, 'tr', { sensitivity: 'base' });
+  return dir === 'asc' ? result : -result;
+}
+
+function sortUsers(list: UserRow[], sortKey: SortKey, sortDir: SortDir): UserRow[] {
+  return [...list].sort((a, b) => {
+    switch (sortKey) {
+      case 'fullName':
+        return compareText(a.fullName, b.fullName, sortDir);
+      case 'email':
+        return compareText(a.email, b.email, sortDir);
+      case 'username':
+        return compareText(a.username, b.username, sortDir);
+      case 'tenantName':
+        return compareText(a.tenantName, b.tenantName, sortDir);
+      case 'roles':
+        return compareText(
+          [...a.roles].sort((x, y) => x.localeCompare(y, 'tr')).join(', '),
+          [...b.roles].sort((x, y) => x.localeCompare(y, 'tr')).join(', '),
+          sortDir,
+        );
+      case 'status': {
+        const av = a.isActive ? 0 : 1;
+        const bv = b.isActive ? 0 : 1;
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      default:
+        return 0;
+    }
+  });
+}
+
+function filterUsers(
+  list: UserRow[],
+  search: string,
+  tenantFilter: string,
+  roleFilter: string,
+  statusFilter: StatusFilter,
+): UserRow[] {
+  const q = search.trim().toLowerCase();
+  return list.filter((user) => {
+    if (statusFilter === 'active' && !user.isActive) return false;
+    if (statusFilter === 'inactive' && user.isActive) return false;
+    if (tenantFilter && user.tenantId !== tenantFilter) return false;
+    if (roleFilter && !user.roles.some((r) => r === roleFilter)) return false;
+    if (!q) return true;
+    const haystack = [
+      user.fullName,
+      user.email,
+      user.username,
+      user.tenantName,
+      user.phoneNumber,
+      ...user.roles,
+    ].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+}
 
 interface AxiosErrorResponse {
   response?: { data?: { message?: string } };
@@ -66,6 +130,77 @@ export default function Users() {
   const [form, setForm] = useState<UserFormState>(EMPTY_FORM);
   const [lockedSuperAdmin, setLockedSuperAdmin] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const [search, setSearch] = useState('');
+  const [tenantFilter, setTenantFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('fullName');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const tenantOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    users.forEach((u) => map.set(u.tenantId, u.tenantName));
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  }, [users]);
+
+  const roleOptions = useMemo(() => {
+    const set = new Set<string>();
+    users.forEach((u) => u.roles.forEach((r) => set.add(r)));
+    return [...set].sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [users]);
+
+  const filteredUsers = useMemo(
+    () => filterUsers(users, search, tenantFilter, roleFilter, statusFilter),
+    [users, search, tenantFilter, roleFilter, statusFilter],
+  );
+
+  const sortedUsers = useMemo(
+    () => sortUsers(filteredUsers, sortKey, sortDir),
+    [filteredUsers, sortKey, sortDir],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return sortedUsers.slice(start, start + PAGE_SIZE);
+  }, [sortedUsers, safePage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, tenantFilter, roleFilter, statusFilter, sortKey, sortDir]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIndicator = (key: SortKey) => {
+    if (sortKey !== key) return '↕';
+    return sortDir === 'asc' ? '↑' : '↓';
+  };
+
+  const clearFilters = () => {
+    setSearch('');
+    setTenantFilter('');
+    setRoleFilter('');
+    setStatusFilter('all');
+  };
+
+  const hasActiveFilters = !!(search.trim() || tenantFilter || roleFilter || statusFilter !== 'all');
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
@@ -203,18 +338,103 @@ export default function Users() {
         </button>
       </div>
 
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Ara</label>
+            <input
+              type="text"
+              placeholder="İsim, e-posta, kullanıcı adı..."
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Firma</label>
+            <select
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              value={tenantFilter}
+              onChange={(e) => setTenantFilter(e.target.value)}
+            >
+              <option value="">Tüm firmalar</option>
+              {tenantOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Rol</label>
+            <select
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+            >
+              <option value="">Tüm roller</option>
+              {roleOptions.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Durum</label>
+            <select
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            >
+              <option value="all">Tümü</option>
+              <option value="active">Aktif</option>
+              <option value="inactive">Pasif</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-500 font-medium">
+            {sortedUsers.length} kullanıcı
+            {hasActiveFilters && ` (toplam ${users.length} içinden)`}
+            {sortedUsers.length > 0 && ` · Sayfa ${safePage} / ${totalPages}`}
+          </p>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs font-bold text-blue-600 hover:text-blue-800"
+            >
+              Filtreleri temizle
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <table className="w-full text-left">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="p-4 font-semibold text-slate-700">İsim / E-posta</th>
-              <th className="p-4 font-semibold text-slate-700">Firma</th>
-              <th className="p-4 font-semibold text-slate-700">Roller</th>
-              <th className="p-4 font-semibold text-slate-700">Durum</th>
+              <th className="p-4 font-semibold text-slate-700">
+                <button type="button" onClick={() => handleSort('fullName')} className="inline-flex items-center gap-1 hover:text-blue-600">
+                  İsim / E-posta <span className="text-slate-400 text-xs">{sortIndicator('fullName')}</span>
+                </button>
+              </th>
+              <th className="p-4 font-semibold text-slate-700">
+                <button type="button" onClick={() => handleSort('tenantName')} className="inline-flex items-center gap-1 hover:text-blue-600">
+                  Firma <span className="text-slate-400 text-xs">{sortIndicator('tenantName')}</span>
+                </button>
+              </th>
+              <th className="p-4 font-semibold text-slate-700">
+                <button type="button" onClick={() => handleSort('roles')} className="inline-flex items-center gap-1 hover:text-blue-600">
+                  Roller <span className="text-slate-400 text-xs">{sortIndicator('roles')}</span>
+                </button>
+              </th>
+              <th className="p-4 font-semibold text-slate-700">
+                <button type="button" onClick={() => handleSort('status')} className="inline-flex items-center gap-1 hover:text-blue-600">
+                  Durum <span className="text-slate-400 text-xs">{sortIndicator('status')}</span>
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {paginatedUsers.map((user) => (
               <tr
                 key={user.id}
                 onClick={() => openEdit(user)}
@@ -251,15 +471,52 @@ export default function Users() {
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {sortedUsers.length === 0 && (
               <tr>
                 <td colSpan={4} className="p-8 text-center text-slate-400 text-sm">
-                  Henüz kullanıcı yok.
+                  {users.length === 0 ? 'Henüz kullanıcı yok.' : 'Filtrelere uygun kullanıcı bulunamadı.'}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+
+        {sortedUsers.length > PAGE_SIZE && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-200 bg-slate-50">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-white border border-slate-300 text-slate-700 disabled:opacity-40 hover:bg-slate-100"
+            >
+              ← Önceki
+            </button>
+            <div className="flex flex-wrap items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setCurrentPage(page)}
+                  className={`min-w-[2rem] px-2 py-1.5 rounded-lg text-sm font-bold transition ${
+                    page === safePage
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-white border border-slate-300 text-slate-700 disabled:opacity-40 hover:bg-slate-100"
+            >
+              Sonraki →
+            </button>
+          </div>
+        )}
       </div>
 
       {modalMode && (

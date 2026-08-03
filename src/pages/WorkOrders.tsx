@@ -74,6 +74,7 @@ interface ProjectLookup {
 
 interface LookupData {
   personnel: { id: string; fullName: string }[];
+  officeUsers: { id: string; fullName: string }[];
   types: string[];
   categories: string[];
   stations: StationLookup[];
@@ -94,6 +95,7 @@ export default function WorkOrders() {
   
   const [lookups, setLookups] = useState<LookupData>({ 
     personnel: [], 
+    officeUsers: [],
     types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'], 
     categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
     stations: [],
@@ -137,6 +139,9 @@ export default function WorkOrders() {
     assignedToUserId: '',
     isPeriodic: false,
     recurrenceInterval: 'Haftalik',
+    startedAt: '',
+    completedAt: '',
+    cancelledAt: '',
   });
 
   const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
@@ -275,6 +280,9 @@ export default function WorkOrders() {
       recurrenceInterval: order.recurrenceInterval && order.recurrenceInterval !== 'None'
         ? order.recurrenceInterval
         : 'Haftalik',
+      startedAt: order.startedAt ? toTurkeyDateTimeLocal(order.startedAt) : '',
+      completedAt: order.completedAt ? toTurkeyDateTimeLocal(order.completedAt) : '',
+      cancelledAt: order.cancelledAt ? toTurkeyDateTimeLocal(order.cancelledAt) : '',
     });
     setIsDetailModalOpen(true);
     void loadOrderPhotos(order.id);
@@ -303,7 +311,7 @@ export default function WorkOrders() {
     }
     setIsSavingDetail(true);
     try {
-      const { data } = await api.put(`/workorders/${selectedOrder.id}`, {
+      const payload: Record<string, unknown> = {
         title: editFormData.title,
         customerName: editFormData.customerName,
         description: editFormData.description,
@@ -321,7 +329,13 @@ export default function WorkOrders() {
         assignedToUserId: editFormData.assignedToUserId || null,
         isPeriodic: editFormData.isPeriodic,
         recurrenceInterval: editFormData.isPeriodic ? editFormData.recurrenceInterval : 'None',
-      });
+      };
+      if (isSuperAdminUser) {
+        if (editFormData.startedAt) payload.startedAt = new Date(editFormData.startedAt).toISOString();
+        if (editFormData.completedAt) payload.completedAt = new Date(editFormData.completedAt).toISOString();
+        if (editFormData.cancelledAt) payload.cancelledAt = new Date(editFormData.cancelledAt).toISOString();
+      }
+      const { data } = await api.put(`/workorders/${selectedOrder.id}`, payload);
 
       const updated: WorkOrderData = {
         ...selectedOrder,
@@ -344,6 +358,9 @@ export default function WorkOrders() {
         assignedToUserName: data.assignedToUserName,
         isPeriodic: data.isPeriodic,
         recurrenceInterval: data.recurrenceInterval,
+        startedAt: data.startedAt ?? selectedOrder.startedAt,
+        completedAt: data.completedAt ?? selectedOrder.completedAt,
+        cancelledAt: data.cancelledAt ?? selectedOrder.cancelledAt,
         titleEn: null,
         descriptionEn: null,
         mobileDescriptionEn: null,
@@ -636,8 +653,13 @@ export default function WorkOrders() {
             }),
           );
 
+          const mappedOffice = (backendData.officeUsers ?? []).map(
+            (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
+          );
+
           setLookups({
             personnel: mappedPersonnel,
+            officeUsers: mappedOffice,
             types: ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'],
             categories: ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
             stations: mappedStations,
@@ -720,7 +742,7 @@ export default function WorkOrders() {
       </div>
 
       {selectedOrders.length > 0 && (
-        <div className="bg-brand-navy text-white px-5 py-3 rounded-xl mb-4 shadow-md space-y-3">
+        <div className="mb-4 space-y-3 rounded-xl bg-brand-navy px-5 py-3 text-white shadow-md min-w-0 overflow-hidden">
           <div className="flex flex-wrap justify-between items-center gap-3">
             <span className="font-bold text-sm">{selectedOrders.length} iş emri seçildi</span>
             <div className="flex flex-wrap gap-2">
@@ -729,9 +751,9 @@ export default function WorkOrders() {
             </div>
           </div>
           {isSuperAdminUser && (
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-white/10 rounded-lg p-3">
+            <div className="flex min-w-0 flex-col gap-2 rounded-lg bg-white/10 p-3">
               <select
-                className="flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-slate-800 bg-white"
+                className="min-w-0 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm font-semibold text-slate-800"
                 value={bulkAssignUserId}
                 onChange={(e) => setBulkAssignUserId(e.target.value)}
               >
@@ -744,7 +766,7 @@ export default function WorkOrders() {
                 type="button"
                 onClick={handleBulkAssign}
                 disabled={isBulkAssigning || !bulkAssignUserId}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-colors sm:w-40 shrink-0"
+                className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-xs font-bold transition-colors hover:bg-emerald-600 disabled:opacity-50"
               >
                 {isBulkAssigning ? 'Atanıyor...' : 'İşi Ata'}
               </button>
@@ -774,14 +796,17 @@ export default function WorkOrders() {
             <div key={order.id} onClick={() => order.position && setFocusedMarkerPosition([...order.position])} className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''}`}>
               <input type="checkbox" className="ga-checkbox" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
               <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="text-base font-bold text-brand-navy truncate">Nokta Adı: {order.customerName || order.title}</h3>
-                  {partnerKey === 'all' && partner && partner.key !== 'all' && (
-                    <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: partner.color }}>
-                      {partner.name}
-                    </span>
-                  )}
-                </div>
+                {partnerKey === 'all' && partner && partner.key !== 'all' && (
+                  <span
+                    className="mb-1.5 inline-block shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-extrabold text-white"
+                    style={{ backgroundColor: partner.color }}
+                  >
+                    {partner.name}
+                  </span>
+                )}
+                <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy break-words">
+                  Nokta Adı: {order.customerName || order.title}
+                </h3>
                 <div className="flex flex-col gap-1.5 text-xs mb-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">İş Tipi</span>
@@ -939,9 +964,12 @@ export default function WorkOrders() {
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Gerçek Başlangıç</label>
                 <input
-                  disabled
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed"
-                  value={formatTurkeyDateTime(selectedOrder.startedAt) || '—'}
+                  type={isEditingDetail && isSuperAdminUser ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdminUser)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdminUser ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
+                  value={isEditingDetail && isSuperAdminUser ? editFormData.startedAt : (formatTurkeyDateTime(selectedOrder.startedAt) || '—')}
+                  onChange={(e) => setEditFormData({ ...editFormData, startedAt: e.target.value })}
+                  title={!isSuperAdminUser ? 'Gerçek başlangıç yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
                 />
               </div>
               <div>
@@ -951,13 +979,26 @@ export default function WorkOrders() {
                     : 'Bitiş Tarihi'}
                 </label>
                 <input
-                  disabled
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed"
+                  type={isEditingDetail && isSuperAdminUser ? 'datetime-local' : 'text'}
+                  disabled={!(isEditingDetail && isSuperAdminUser)}
+                  className={`w-full border rounded-lg p-2.5 font-medium outline-none ${isEditingDetail && isSuperAdminUser ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`}
                   value={
-                    selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi'
-                      ? (formatTurkeyDateTime(selectedOrder.cancelledAt) || '—')
-                      : (formatTurkeyDateTime(selectedOrder.completedAt) || '—')
+                    isEditingDetail && isSuperAdminUser
+                      ? (selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi'
+                          ? editFormData.cancelledAt
+                          : editFormData.completedAt)
+                      : (selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi'
+                          ? (formatTurkeyDateTime(selectedOrder.cancelledAt) || '—')
+                          : (formatTurkeyDateTime(selectedOrder.completedAt) || '—'))
                   }
+                  onChange={(e) => {
+                    if (selectedOrder.cancelledAt || selectedOrder.status === 'İptal' || selectedOrder.status === 'İptal Edildi') {
+                      setEditFormData({ ...editFormData, cancelledAt: e.target.value });
+                    } else {
+                      setEditFormData({ ...editFormData, completedAt: e.target.value });
+                    }
+                  }}
+                  title={!isSuperAdminUser ? 'Gerçek bitiş yalnızca Süper Admin tarafından değiştirilebilir' : undefined}
                 />
               </div>
               <div>
@@ -1037,15 +1078,15 @@ export default function WorkOrders() {
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Operasyon Sorumlusu</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.operationUserId} onChange={(e) => setEditFormData({ ...editFormData, operationUserId: e.target.value })}>
-                          <option value="">-</option>
-                          {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                          <option value="">Seçiniz</option>
+                          {lookups.officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Açan Yetkili</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.openedByUserId} onChange={(e) => setEditFormData({ ...editFormData, openedByUserId: e.target.value })}>
-                          <option value="">-</option>
-                          {lookups.personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                          <option value="">Seçiniz</option>
+                          {lookups.officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
                       {isSuperAdminUser && (

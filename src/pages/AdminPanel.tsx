@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { formatTurkeyDateTime } from '../utils/dateTime';
 
 interface TenantLookup {
   id: string;
@@ -229,7 +230,7 @@ export default function AdminPanel() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      {t.isDemo && t.demoExpiresAt ? `Bitiş: ${t.demoExpiresAt} UTC` : 'Demo yok'}
+                      {t.isDemo && t.demoExpiresAt ? `Bitiş: ${formatTurkeyDateTime(t.demoExpiresAt)}` : 'Demo yok'}
                     </p>
                   </div>
                   {t.isDemo && (
