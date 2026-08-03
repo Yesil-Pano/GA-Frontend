@@ -8,6 +8,7 @@ interface DashboardStats {
   acilCount: number;
   ortaCount: number;
   dusukCount: number;
+  bekliyorCount: number;
   devamEdiyorCount: number;
   tamamlandiCount: number;
   iptalEdildiCount: number;
@@ -32,7 +33,7 @@ export default function Dashboard() {
   const { partnerKey } = useOutletContext<{ partnerKey?: string }>();
   const [stats, setStats] = useState<DashboardStats>({
     totalCount: 0, acilCount: 0, ortaCount: 0, dusukCount: 0,
-    devamEdiyorCount: 0, tamamlandiCount: 0, iptalEdildiCount: 0, activeUsers: 0,
+    bekliyorCount: 0, devamEdiyorCount: 0, tamamlandiCount: 0, iptalEdildiCount: 0, activeUsers: 0,
     completedToday: 0,
   });
   const [monthlyActivity, setMonthlyActivity] = useState<MonthlyDay[]>([]);
@@ -97,6 +98,13 @@ export default function Dashboard() {
                 <div className="h-6 bg-red-500 transition-all duration-500" style={{ width: `${stats.totalCount > 0 ? (stats.acilCount / stats.totalCount) * 100 : 0}%` }} />
               </div>
               <span className="text-xs font-bold text-slate-500 w-6">{stats.acilCount}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-24 text-right text-xs text-slate-500 font-bold">Bekliyor</span>
+              <div className="flex-1 h-6 bg-slate-100 rounded overflow-hidden">
+                <div className="h-6 bg-amber-500 transition-all duration-500" style={{ width: `${stats.totalCount > 0 ? (stats.bekliyorCount / stats.totalCount) * 100 : 0}%` }} />
+              </div>
+              <span className="text-xs font-bold text-slate-500 w-6">{stats.bekliyorCount}</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-24 text-right text-xs text-slate-500 font-bold">Devam Ediyor</span>

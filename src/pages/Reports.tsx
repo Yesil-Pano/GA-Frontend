@@ -59,6 +59,7 @@ const COMPLETION_TYPES = [
   'Tamamlandı',
   'İptal Edildi',
   'Devam Ediyor',
+  'Bekliyor',
   'Atanmamış',
   'Atanmış',
 ];

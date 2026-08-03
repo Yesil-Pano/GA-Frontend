@@ -71,7 +71,7 @@ export default function Login() {
         <div className="flex flex-col items-center mb-8">
           <img src={logoImg} alt="Görev Adamı" className="w-24 h-24 object-contain mb-4" />
           <h1 className="text-2xl font-extrabold text-brand-navy">Sisteme Giriş Yap</h1>
-          <p className="text-sm text-slate-500 mt-2 font-medium">Lütfen e-posta ve şifrenizi giriniz.</p>
+          <p className="text-sm text-slate-500 mt-2 font-medium">E-posta veya kullanıcı adı ve şifrenizi giriniz.</p>
         </div>
 
         {error && (
@@ -82,13 +82,13 @@ export default function Login() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">E-posta Adresi</label>
+            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">E-posta veya Kullanıcı Adı</label>
             <input
-              type="email"
+              type="text"
               required
               autoComplete="username" 
               className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
-              placeholder="ornek@sirket.com"
+              placeholder="ornek@sirket.com veya kullaniciadi"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />

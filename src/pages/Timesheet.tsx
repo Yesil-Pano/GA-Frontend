@@ -84,7 +84,7 @@ export default function Timesheet() {
             title: w.title,
             customerName: w.customerName,
             priority: w.priority || 'Orta',
-            status: w.status === 'Bekliyor' ? 'Devam Ediyor' : (w.status || 'Devam Ediyor'),
+            status: w.status || 'Atanmamış',
             startDate: w.startDate || w.plannedDate || '',
             endDate: w.endDate || '',
             assignedToUserId: w.assignedToUserId,
@@ -283,7 +283,7 @@ export default function Timesheet() {
       const response = await api.get('/workorders');
       const rawOrders = Array.isArray(response.data) ? response.data : [];
       const refreshedOrders = rawOrders.map((w: BackendWorkOrderForCalendar) => ({
-        id: w.id, title: w.title, customerName: w.customerName, priority: w.priority || 'Orta', status: w.status === 'Bekliyor' ? 'Devam Ediyor' : (w.status || 'Devam Ediyor'),
+        id: w.id, title: w.title, customerName: w.customerName, priority: w.priority || 'Orta', status: w.status || 'Atanmamış',
         startDate: w.startDate || w.plannedDate || '', endDate: w.endDate || '', assignedToUserId: w.assignedToUserId, assignedToUserName: w.assignedToUserName
       }));
       setOrders(refreshedOrders);
@@ -477,7 +477,7 @@ export default function Timesheet() {
             <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                className="ga-checkbox ga-checkbox-accent-emerald"
                 checked={formData.isPeriodic}
                 onChange={e => setFormData({ ...formData, isPeriodic: e.target.checked })}
               />

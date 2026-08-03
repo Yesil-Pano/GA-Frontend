@@ -1,5 +1,5 @@
 // src/pages/Teams.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
@@ -63,6 +63,8 @@ interface PeriodicOccurrence {
   status: string;
   assignedToUserId: string | null;
   assignedToUserName: string;
+  isTemplate?: boolean;
+  periodIndex?: number;
 }
 
 interface ProjectLookup {
@@ -84,6 +86,56 @@ interface AxiosErrorResponse {
   };
 }
 
+type AssignedJobStatusFilter = 'Tümü' | 'Bekliyor' | 'Devam Ediyor' | 'Tamamlandı' | 'İptal';
+
+const ASSIGNED_JOB_STATUS_ORDER: Record<string, number> = {
+  'Devam Ediyor': 0,
+  'Bekliyor': 1,
+  'Tamamlandı': 2,
+  'İptal': 3,
+  'İptal Edildi': 3,
+};
+
+const ASSIGNED_JOB_STATUS_FILTERS: { key: AssignedJobStatusFilter; label: string; active: string; idle: string }[] = [
+  { key: 'Tümü', label: 'Tümü', active: 'bg-brand-navy text-white border-brand-navy', idle: 'bg-white text-slate-600 border-slate-200 hover:border-slate-300' },
+  { key: 'Devam Ediyor', label: 'Devam Ediyor', active: 'bg-blue-600 text-white border-blue-600', idle: 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300' },
+  { key: 'Bekliyor', label: 'Bekliyor', active: 'bg-amber-500 text-white border-amber-500', idle: 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-300' },
+  { key: 'Tamamlandı', label: 'Tamamlandı', active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-300' },
+  { key: 'İptal', label: 'İptal', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
+];
+
+function assignedJobSortKey(status: string): number {
+  return ASSIGNED_JOB_STATUS_ORDER[status] ?? 4;
+}
+
+function matchesAssignedJobStatusFilter(status: string, filter: AssignedJobStatusFilter): boolean {
+  if (filter === 'Tümü') return true;
+  if (filter === 'İptal') return status === 'İptal' || status === 'İptal Edildi';
+  return status === filter;
+}
+
+function periodRowClass(status: string): string {
+  if (status === 'Tamamlandı' || status === 'İptal' || status === 'İptal Edildi')
+    return 'border-slate-200 bg-slate-100 opacity-75';
+  return 'border-slate-200 bg-slate-50';
+}
+
+function jobStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'Bekliyor':
+      return 'text-amber-700 bg-amber-50 border-amber-200';
+    case 'Devam Ediyor':
+      return 'text-blue-700 bg-blue-50 border-blue-200';
+    case 'Tamamlandı':
+      return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+    case 'İptal':
+    case 'İptal Edildi':
+      return 'text-rose-700 bg-rose-50 border-rose-200';
+    default:
+      return 'text-slate-600 bg-white border-slate-200';
+  }
+}
+
 export default function Teams() {
   const [searchTerm, setSearchTerm] = useState('');
   const [teams, setTeams] = useState<TeamMemberData[]>([]);
@@ -98,6 +150,7 @@ export default function Teams() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<TeamMemberData | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'jobs'>('details');
+  const [assignedJobStatusFilter, setAssignedJobStatusFilter] = useState<AssignedJobStatusFilter>('Tümü');
   const [isEditingModal, setIsEditingModal] = useState(false); 
 
   // 🚀 FORM STATE'İNE YENİ ALANLAR EKLENDİ
@@ -295,7 +348,7 @@ export default function Teams() {
   const handleDeleteTeam = async () => {
     if (!selectedTeam) return;
     const confirmed = window.confirm(
-      `"${selectedTeam.name}" ekibini silmek istediğinize emin misiniz?\n\nAçık iş emirleri (Devam Ediyor) Atanmamış'a çekilecek. Tamamlanan işler silinmez.`,
+      `"${selectedTeam.name}" ekibini silmek istediğinize emin misiniz?\n\nAçık iş emirleri (Bekliyor / Devam Ediyor) Atanmamış'a çekilecek. Tamamlanan işler silinmez.`,
     );
     if (!confirmed) return;
 
@@ -338,13 +391,23 @@ export default function Teams() {
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
   })();
 
-  const assignedJobs = allWorkOrders.filter(
-    (order) =>
-      order.assignedToUserId === selectedTeam?.id &&
-      order.status !== 'Tamamlandı' &&
-      order.status !== 'İptal' &&
-      order.status !== 'İptal Edildi'
+  const teamAssignedJobsAll = useMemo(
+    () =>
+      allWorkOrders.filter(
+        (order) =>
+          order.assignedToUserId === selectedTeam?.id && !order.parentWorkOrderId,
+      ),
+    [allWorkOrders, selectedTeam?.id],
   );
+
+  const assignedJobs = useMemo(() => {
+    const filtered = teamAssignedJobsAll.filter((order) =>
+      matchesAssignedJobStatusFilter(order.status, assignedJobStatusFilter),
+    );
+    return [...filtered].sort(
+      (a, b) => assignedJobSortKey(a.status) - assignedJobSortKey(b.status),
+    );
+  }, [teamAssignedJobsAll, assignedJobStatusFilter]);
 
   const handleWithdrawJob = async (jobId: string) => {
     if (!isSuperAdminUser) {
@@ -403,6 +466,42 @@ export default function Teams() {
     } catch (error) {
       console.error(error);
       alert('Atama güncellenemedi.');
+    } finally {
+      setReassigningOccurrenceId(null);
+    }
+  };
+
+  const handleReassignForward = async (occurrenceId: string) => {
+    const userId = reassignByOccurrence[occurrenceId];
+    if (!userId) {
+      alert('Yeni ekip üyesi seçin.');
+      return;
+    }
+    if (!window.confirm('Seçilen dönemden itibaren (dahil) sonraki tüm dönemlere bu atama uygulanacak. Devam edilsin mi?')) return;
+    setReassigningOccurrenceId(occurrenceId);
+    try {
+      await api.post(`/workorders/${occurrenceId}/reassign-forward`, { assignedToUserId: userId });
+      await reloadDataForSubmit();
+      if (periodicJob) await openPeriodicModal(periodicJob);
+      alert('Sonraki dönemler güncellendi.');
+    } catch (error) {
+      console.error(error);
+      alert('Toplu atama güncellenemedi.');
+    } finally {
+      setReassigningOccurrenceId(null);
+    }
+  };
+
+  const handleWithdrawPeriod = async (occurrenceId: string) => {
+    if (!window.confirm('Bu dönemin ataması kaldırılsın mı?')) return;
+    setReassigningOccurrenceId(occurrenceId);
+    try {
+      await api.put(`/workorders/${occurrenceId}/assign`, { assignedToUserId: null });
+      await reloadDataForSubmit();
+      if (periodicJob) await openPeriodicModal(periodicJob);
+    } catch (error) {
+      console.error(error);
+      alert('Atama kaldırılamadı.');
     } finally {
       setReassigningOccurrenceId(null);
     }
@@ -623,7 +722,7 @@ export default function Teams() {
             >
               <div className="flex justify-between items-start mb-2">
                 <label className="flex items-center gap-3 cursor-pointer min-w-0" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-brand-orange shrink-0" />
+                  <input type="checkbox" className="ga-checkbox" />
                   <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors truncate">{team.name}</span>
                 </label>
                 {partnerKey === 'all' && partner && partner.key !== 'all' ? (
@@ -673,7 +772,8 @@ export default function Teams() {
                     });
                     setEditProjectIds(team.projectIds || []);
 
-                    setActiveTab('details'); 
+                    setActiveTab('details');
+                    setAssignedJobStatusFilter('Tümü');
                     setIsEditingModal(false); 
                     setIsDetailModalOpen(true);
                   }}
@@ -746,7 +846,7 @@ export default function Teams() {
               ) : (
               projects.map((proj) => (
                 <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-slate-700">
-                  <input type="checkbox" className="w-4 h-4 rounded text-brand-orange border-slate-300" checked={selectedProjectIds.includes(proj.id)} onChange={() => setSelectedProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
+                  <input type="checkbox" className="ga-checkbox" checked={selectedProjectIds.includes(proj.id)} onChange={() => setSelectedProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
                   <span>{proj.name}</span>
                 </label>
               ))
@@ -777,7 +877,7 @@ export default function Teams() {
 
             <div className="flex border-b border-slate-200 bg-slate-100/50 px-6 pt-2 shrink-0">
               <button disabled={isEditingModal} onClick={() => setActiveTab('details')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'details' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Ekip Bilgileri</button>
-              <button disabled={isEditingModal} onClick={() => setActiveTab('jobs')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'jobs' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Atanmış İşler</button>
+              <button disabled={isEditingModal} onClick={() => setActiveTab('jobs')} className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${activeTab === 'jobs' ? 'border-brand-orange text-brand-orange bg-white rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Atanmış İşler ({teamAssignedJobsAll.length})</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar text-xs">
@@ -943,7 +1043,7 @@ export default function Teams() {
                         <div className="w-full border border-blue-400 rounded-xl p-3 bg-white max-h-36 overflow-y-auto space-y-2 shadow-inner">
                           {editProjectOptions.map((proj) => (
                             <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold">
-                              <input type="checkbox" className="w-4 h-4 rounded text-brand-orange" checked={editProjectIds.includes(proj.id)} onChange={() => setEditProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
+                              <input type="checkbox" className="ga-checkbox" checked={editProjectIds.includes(proj.id)} onChange={() => setEditProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
                               <span>{proj.name}</span>
                             </label>
                           ))}
@@ -968,8 +1068,26 @@ export default function Teams() {
 
               {activeTab === 'jobs' && (
                 <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2 pb-1">
+                    {ASSIGNED_JOB_STATUS_FILTERS.map((chip) => (
+                      <button
+                        key={chip.key}
+                        type="button"
+                        onClick={() => setAssignedJobStatusFilter(chip.key)}
+                        className={`text-[11px] font-bold px-3 py-1.5 rounded-full border transition ${
+                          assignedJobStatusFilter === chip.key ? chip.active : chip.idle
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
                   {assignedJobs.length === 0 ? (
-                    <div className="text-center py-10 text-slate-400 font-medium">📭 Bu ekip üyesine henüz atanmış bir iş emri bulunmuyor.</div>
+                    <div className="text-center py-10 text-slate-400 font-medium">
+                      {teamAssignedJobsAll.length === 0
+                        ? '📭 Bu ekip üyesine henüz atanmış bir iş emri bulunmuyor.'
+                        : 'Seçilen filtreye uygun iş emri bulunmuyor.'}
+                    </div>
                   ) : (
                     assignedJobs.map((job) => (
                       <div key={job.id} className="border border-slate-200 bg-slate-50 rounded-xl p-3 flex justify-between items-center shadow-sm gap-3">
@@ -978,8 +1096,8 @@ export default function Teams() {
                           <p className="text-slate-500 text-[11px] font-medium truncate">Özet: {job.title} | Tip: <span className="font-bold">{job.type}</span></p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] text-slate-400 font-semibold bg-white border border-slate-200 rounded px-1.5 py-0.5">{job.status}</span>
-                          {isSuperAdminUser && (job.isPeriodic || job.parentWorkOrderId) && (
+                          <span className={`text-[10px] font-semibold border rounded px-1.5 py-0.5 ${jobStatusBadgeClass(job.status)}`}>{job.status}</span>
+                          {isSuperAdminUser && job.isPeriodic && !job.parentWorkOrderId && (
                             <button
                               type="button"
                               onClick={() => openPeriodicModal(job)}
@@ -1191,46 +1309,82 @@ export default function Teams() {
       {periodicModalOpen && periodicJob && (
         <ModalOverlay className="animate-fadeIn">
           <div
-            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-bold text-brand-navy">Periyodik Dönem Atamaları</h3>
               <p className="text-sm text-slate-500 mt-1">{periodicJob.customerName} — {periodicJob.title}</p>
+              <p className="text-[11px] text-slate-400 mt-1">Açılış ayından yıl sonuna kadar tüm dönemler listelenir. Tek dönem veya sonrasına toplu atama yapabilirsiniz.</p>
             </div>
-            <div className="p-6 overflow-y-auto flex-1 space-y-3">
+            <div className="p-4 overflow-y-auto flex-1">
               {periodicLoading ? (
                 <p className="text-center text-slate-400 py-8">Dönemler yükleniyor...</p>
               ) : periodicOccurrences.length === 0 ? (
-                <p className="text-center text-slate-400 py-8">Henüz üretilmiş dönem yok.</p>
+                <p className="text-center text-slate-400 py-8">Dönem bulunamadı.</p>
               ) : (
-                periodicOccurrences.map((occ) => (
-                  <div key={occ.id} className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-wrap gap-2 items-center">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-sm text-brand-navy">{occ.periodLabel ?? occ.startDate}</p>
-                      <p className="text-[11px] text-slate-500">{occ.startDate} → {occ.endDate} · {occ.status}</p>
-                      <p className="text-[11px] text-slate-600">Atanan: {occ.assignedToUserName}</p>
-                    </div>
-                    <select
-                      className="border border-slate-300 rounded-lg p-2 text-xs font-semibold"
-                      value={reassignByOccurrence[occ.id] ?? ''}
-                      onChange={(e) => setReassignByOccurrence((prev) => ({ ...prev, [occ.id]: e.target.value }))}
-                    >
-                      <option value="">Yeni ekip</option>
-                      {teams.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={reassigningOccurrenceId === occ.id}
-                      onClick={() => handleReassignOccurrence(occ.id)}
-                      className="text-xs font-bold bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {reassigningOccurrenceId === occ.id ? '...' : 'Ata'}
-                    </button>
+                <div className="space-y-2">
+                  <div className="hidden sm:grid sm:grid-cols-[2.5rem_1fr_1.2fr_1fr_auto] gap-2 px-2 pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <span>#</span>
+                    <span>Dönem</span>
+                    <span>Tarih</span>
+                    <span>Atanan</span>
+                    <span>İşlem</span>
                   </div>
-                ))
+                  {periodicOccurrences.map((occ) => (
+                    <div
+                      key={occ.id}
+                      className={`rounded-xl border p-3 flex flex-col sm:grid sm:grid-cols-[2.5rem_1fr_1.2fr_1fr_auto] gap-2 sm:items-center ${periodRowClass(occ.status)}`}
+                    >
+                      <span className="text-xs font-bold text-slate-500">{occ.periodIndex ?? '—'}</span>
+                      <div>
+                        <p className="font-bold text-sm text-brand-navy">{occ.periodLabel ?? occ.startDate}</p>
+                        <span className={`inline-block mt-0.5 text-[10px] font-semibold border rounded px-1.5 py-0.5 ${jobStatusBadgeClass(occ.status)}`}>
+                          {occ.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">{occ.startDate} → {occ.endDate}</p>
+                      <p className="text-[11px] font-semibold text-slate-700">{occ.assignedToUserName}</p>
+                      <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                        <select
+                          className="border border-slate-300 rounded-lg p-1.5 text-[11px] font-semibold min-w-[7rem]"
+                          value={reassignByOccurrence[occ.id] ?? ''}
+                          onChange={(e) => setReassignByOccurrence((prev) => ({ ...prev, [occ.id]: e.target.value }))}
+                        >
+                          <option value="">Ekip seç</option>
+                          {teams.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={reassigningOccurrenceId === occ.id}
+                          onClick={() => handleReassignOccurrence(occ.id)}
+                          className="text-[10px] font-bold bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                        >
+                          Ata
+                        </button>
+                        <button
+                          type="button"
+                          disabled={reassigningOccurrenceId === occ.id}
+                          onClick={() => handleReassignForward(occ.id)}
+                          className="text-[10px] font-bold bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-60"
+                          title="Seçilen dönemden sonrasına uygula"
+                        >
+                          Sonrasına
+                        </button>
+                        <button
+                          type="button"
+                          disabled={reassigningOccurrenceId === occ.id}
+                          onClick={() => handleWithdrawPeriod(occ.id)}
+                          className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1.5 rounded-lg hover:bg-rose-100 disabled:opacity-60"
+                        >
+                          Geri Çek
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end">

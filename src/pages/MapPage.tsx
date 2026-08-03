@@ -47,6 +47,14 @@ interface MapPageOutletContext {
 const EDAS_LIST = ["VANGÖLÜ", "ULUDAĞ", "TIRAKYA", "TOROSLAR", "SAKARYA", "OSMANGAZİ", "MERAM", "KCTAŞ", "GDZ", "FIRAT", "DİCLE", "ÇORUH", "ÇAMLIBEL", "BOĞAZİÇİ", "BAŞKENT", "AYEDAŞ", "AKEDAŞ", "AKDENİZ", "ADM", "ARAS"];
 const CITIES = ["Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın","Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri","Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin","Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray","Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova","Karabük","Kilis","Osmaniye","Düzce"];
 
+type StationStatusFilter = 'Tümü' | 'Bakıma Dahil' | 'Bakım Dışı';
+
+const STATION_STATUS_FILTERS: { key: StationStatusFilter; label: string; active: string; idle: string }[] = [
+  { key: 'Tümü', label: 'Tümü', active: 'bg-brand-navy text-white border-brand-navy', idle: 'bg-white text-slate-600 border-slate-200 hover:border-slate-300' },
+  { key: 'Bakıma Dahil', label: 'Bakıma Dahil', active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-300' },
+  { key: 'Bakım Dışı', label: 'Bakım Dışı', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
+];
+
 const todayLocal = (h: number, m = 0) => {
   const n = new Date();
   const pad = (x: number) => String(x).padStart(2, '0');
@@ -84,7 +92,7 @@ const StationListCard = memo(function StationListCard({
     >
       <input
         type="checkbox"
-        className="mt-1 accent-emerald-600 shrink-0"
+        className="ga-checkbox ga-checkbox-accent-emerald mt-0.5"
         checked={selected}
         onChange={(e) => { e.stopPropagation(); onToggleSelect(station.id); }}
         onClick={(e) => e.stopPropagation()}
@@ -122,6 +130,7 @@ export default function MapPage() {
   const navigate = useNavigate();
   const isSuperAdminUser = isSuperAdmin();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusTypeFilter, setStatusTypeFilter] = useState<StationStatusFilter>('Tümü');
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
   const [workCategories, setWorkCategories] = useState<string[]>([
@@ -310,13 +319,19 @@ export default function MapPage() {
   const filteredStations = useMemo(
     () =>
       stations.filter(
-        (s) =>
-          trIncludes(s.name, searchTerm) ||
-          trIncludes(s.city, searchTerm) ||
-          trIncludes(s.district, searchTerm) ||
-          trIncludes(s.address, searchTerm),
+        (s) => {
+          const matchesSearch =
+            trIncludes(s.name, searchTerm) ||
+            trIncludes(s.city, searchTerm) ||
+            trIncludes(s.district, searchTerm) ||
+            trIncludes(s.address, searchTerm);
+          const type = s.statusType || 'Bakıma Dahil';
+          const matchesStatus =
+            statusTypeFilter === 'Tümü' || type === statusTypeFilter;
+          return matchesSearch && matchesStatus;
+        },
       ),
-    [stations, searchTerm],
+    [stations, searchTerm, statusTypeFilter],
   );
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -410,9 +425,23 @@ export default function MapPage() {
             className="w-full border border-slate-300 rounded-lg pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-orange outline-none shadow-inner"
           />
         </div>
+        <div className="flex flex-wrap gap-2">
+          {STATION_STATUS_FILTERS.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => setStatusTypeFilter(chip.key)}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full border transition ${
+                statusTypeFilter === chip.key ? chip.active : chip.idle
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap justify-between items-center gap-2 pb-2 border-b border-slate-100">
           <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
-            <input type="checkbox" className="accent-brand-orange" checked={allFilteredSelected} onChange={toggleSelectAllFiltered} />
+            <input type="checkbox" className="ga-checkbox" checked={allFilteredSelected} onChange={toggleSelectAllFiltered} />
             Filtrelenenleri seç ({filteredStations.length})
           </label>
           <div className="flex gap-2">
@@ -530,7 +559,7 @@ export default function MapPage() {
               <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>
               <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
                 <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs">
-                  <input type="checkbox" checked={bulkForm.isPeriodic} onChange={(e) => setBulkForm({ ...bulkForm, isPeriodic: e.target.checked })} />
+                  <input type="checkbox" className="ga-checkbox" checked={bulkForm.isPeriodic} onChange={(e) => setBulkForm({ ...bulkForm, isPeriodic: e.target.checked })} />
                   Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)
                 </label>
                 {bulkForm.isPeriodic && (

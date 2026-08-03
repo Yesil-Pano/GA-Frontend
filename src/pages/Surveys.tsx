@@ -191,7 +191,7 @@ export default function Surveys() {
         </div>
         <div className="flex justify-between items-center pb-2 border-b border-slate-100">
           <label className="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
-            <input type="checkbox" className="rounded border-slate-300 text-brand-orange" />
+            <input type="checkbox" className="ga-checkbox" />
             <span>Tümünü Seç</span>
           </label>
           <button type="button" onClick={handleOpenForm} className="px-3 py-1.5 bg-white border border-blue-500 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50 transition shadow-sm">
@@ -228,7 +228,7 @@ export default function Surveys() {
               >
                 <div className="flex justify-between items-start">
                   <div className="flex items-start gap-2.5">
-                    <input type="checkbox" className="mt-1 rounded border-slate-300 text-brand-orange" onClick={e => e.stopPropagation()} />
+                    <input type="checkbox" className="ga-checkbox mt-0.5" onClick={e => e.stopPropagation()} />
                     <div>
                       <h4 className="font-bold text-brand-navy text-sm group-hover:text-brand-orange transition-colors">{survey.status}</h4>
                       <p className="text-[11px] text-slate-400 font-bold mt-0.5">{survey.title}</p>

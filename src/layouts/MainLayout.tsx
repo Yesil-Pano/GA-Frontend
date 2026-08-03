@@ -81,7 +81,7 @@ export default function MainLayout() {
   const fetchNotifications = useCallback(async () => {
     try {
       const { data } = await api.get<{ unread: number; items: AppNotificationItem[] }>('/notifications', {
-        params: { take: 10 },
+        params: { take: 10, scope: 'office' },
       });
       setNotifications(data.items || []);
       setUnreadCount(data.unread || 0);
@@ -434,7 +434,7 @@ export default function MainLayout() {
                     type="button"
                     className="text-[10px] text-brand-orange font-bold"
                     onClick={async () => {
-                      await api.put('/notifications/read-all');
+                      await api.put('/notifications/read-all', null, { params: { scope: 'office' } });
                       fetchNotifications();
                     }}
                   >

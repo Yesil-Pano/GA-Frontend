@@ -15,3 +15,23 @@ body {
   font-family: 'Montserrat', sans-serif;
   background-color: #F8FAFC; /* Çok hafif gri, Dashboard arka planı için temiz bir görünüm */
 }
+
+/* Site geneli standart checkbox */
+input[type="checkbox"].ga-checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: var(--color-brand-orange);
+  border-radius: 0.25rem;
+}
+
+input[type="checkbox"].ga-checkbox-accent-emerald {
+  accent-color: #059669;
+}
+
+input[type="checkbox"].ga-checkbox-accent-blue {
+  accent-color: #2563eb;
+}

@@ -150,7 +150,8 @@ export default function WorkOrders() {
     .filter(order => {
       if (filter === 'Tümü') return true;
       if (filter === 'Atanmamış') {
-        return !order.assignedToUserId
+        return order.status === 'Atanmamış'
+          || !order.assignedToUserId
           || !order.assignedToUserName
           || order.assignedToUserName === ''
           || order.assignedToUserName === 'Atanmamış';
@@ -709,6 +710,7 @@ export default function WorkOrders() {
             className="min-w-0 flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
           >
             <option value="Tümü">Tüm İşler</option>
+            <option value="Bekliyor">Bekliyor</option>
             <option value="Devam Ediyor">Devam Ediyor</option>
             <option value="Tamamlanan">Tamamlanan</option>
             <option value="İptal Edilen">İptal Edilen</option>
@@ -752,7 +754,7 @@ export default function WorkOrders() {
       )}
 
       <div className="flex items-center gap-3 mb-3 px-2">
-        <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange" checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0} onChange={handleSelectAll} />
+        <input type="checkbox" className="ga-checkbox" checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0} onChange={handleSelectAll} />
         <span className="text-sm font-bold text-slate-600">Tümünü Seç</span>
       </div>
       
@@ -770,7 +772,7 @@ export default function WorkOrders() {
             const partner = pk ? getPartnerByKey(pk) : null;
             return (
             <div key={order.id} onClick={() => order.position && setFocusedMarkerPosition([...order.position])} className={`cursor-pointer bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative flex items-center gap-4 transition-all hover:border-brand-orange hover:shadow-md ${order.priority === 'Acil' ? 'border-l-4 border-l-rose-600' : ''}`}>
-              <input type="checkbox" className="w-5 h-5 cursor-pointer accent-brand-orange shrink-0" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
+              <input type="checkbox" className="ga-checkbox" checked={selectedOrders.includes(order.id)} onChange={(e) => { e.stopPropagation(); handleSelectOne(order.id); }} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <h3 className="text-base font-bold text-brand-navy truncate">Nokta Adı: {order.customerName || order.title}</h3>
@@ -1061,7 +1063,7 @@ export default function WorkOrders() {
                     <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs cursor-pointer">
                       <input
                         type="checkbox"
-                        className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                        className="ga-checkbox ga-checkbox-accent-emerald"
                         checked={editFormData.isPeriodic}
                         onChange={(e) => setEditFormData({ ...editFormData, isPeriodic: e.target.checked })}
                       />

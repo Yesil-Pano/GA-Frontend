@@ -1,5 +1,6 @@
 // ga-frontend/src/pages/AdminPanel.tsx
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 
 interface TenantLookup {
@@ -30,7 +31,7 @@ const DEMO_DURATIONS = [
 
 export default function AdminPanel() {
   const [tenants, setTenants] = useState<TenantLookup[]>([]);
-  const [activeTab, setActiveTab] = useState<'tenant' | 'project' | 'team'>('tenant');
+  const [activeTab, setActiveTab] = useState<'tenant' | 'project'>('tenant');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [tenantForm, setTenantForm] = useState({
@@ -40,9 +41,6 @@ export default function AdminPanel() {
     demoDuration: 'OneWeek' as string,
   });
   const [projectForm, setProjectForm] = useState({ name: '', tenantId: '' });
-  const [userForm, setUserForm] = useState({
-    username: '', email: '', password: '', fullName: '', phoneNumber: '', tenantId: '',
-  });
   const [extendDurationByTenant, setExtendDurationByTenant] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -129,22 +127,10 @@ export default function AdminPanel() {
     }
   };
 
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.post('/superadmin/users', userForm);
-      showMsg('success', 'Kullanıcı/Ekip ilgili firmaya başarıyla eklendi!');
-      setUserForm({ username: '', email: '', password: '', fullName: '', phoneNumber: '', tenantId: '' });
-    } catch (err) {
-      showMsg('error', errMsg(err));
-    }
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
+  return (    <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
       <div className="border-b border-slate-200 pb-4 mb-6">
         <h1 className="text-2xl font-extrabold text-slate-900">Sistem Yönetim Paneli (Super Admin)</h1>
-        <p className="text-sm text-slate-500 mt-1">Yeni kiracı firmalar, kurumsal projeler ve ekipler bu ekrandan global olarak yönetilir.</p>
+        <p className="text-sm text-slate-500 mt-1">Yeni kiracı firmalar ve kurumsal projeler bu ekrandan yönetilir. Kullanıcı/rol işlemleri Kullanıcı Yönetimi sayfasındadır.</p>
       </div>
 
       {message && (
@@ -153,10 +139,22 @@ export default function AdminPanel() {
         </div>
       )}
 
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-blue-900">Kullanıcı ve rol yönetimi taşındı</p>
+          <p className="text-xs text-blue-800/80 mt-1">Firma ataması, rol seçimi ve saha/ofis kullanıcıları artık Kullanıcı Yönetimi ekranından yapılır.</p>
+        </div>
+        <Link
+          to="/users"
+          className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm text-center transition-colors"
+        >
+          Kullanıcı Yönetimine Git
+        </Link>
+      </div>
+
       <div className="flex space-x-2 bg-slate-100 p-1.5 rounded-xl mb-8">
         <button type="button" onClick={() => setActiveTab('tenant')} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'tenant' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>🏢 Firma Ekle</button>
         <button type="button" onClick={() => setActiveTab('project')} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'project' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>📁 Firmaya Proje Tanımla</button>
-        <button type="button" onClick={() => setActiveTab('team')} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'team' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>👥 Firmaya Ekip/User Ekle</button>
       </div>
 
       {activeTab === 'tenant' && (
@@ -177,7 +175,7 @@ export default function AdminPanel() {
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 accent-blue-600"
+                  className="ga-checkbox ga-checkbox-accent-blue"
                   checked={tenantForm.isDemo}
                   onChange={(e) => setTenantForm({ ...tenantForm, isDemo: e.target.checked })}
                 />
@@ -279,41 +277,6 @@ export default function AdminPanel() {
             </div>
           </div>
           <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl shadow-md transition-colors text-sm">Projeyi Tanımla</button>
-        </form>
-      )}
-
-      {activeTab === 'team' && (
-        <form onSubmit={handleCreateUser} className="space-y-5">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Hedef Firma (Kiracı)</label>
-            <select required className="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white outline-none text-sm focus:ring-2 focus:ring-blue-500" value={userForm.tenantId} onChange={e => setUserForm({ ...userForm, tenantId: e.target.value })}>
-              <option value="">Firma Seçiniz...</option>
-              {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Kullanıcı Adı (Username)</label>
-              <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-300 outline-none text-sm" placeholder="utkuobuz" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">E-Posta Adresi</label>
-              <input type="email" required className="w-full px-4 py-3 rounded-xl border border-slate-300 outline-none text-sm" placeholder="utku@yesilpano.com" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Adı Soyadı</label>
-              <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-300 outline-none text-sm" placeholder="Utku Obuz" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Telefon Numarası</label>
-              <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-300 outline-none text-sm" placeholder="0555..." value={userForm.phoneNumber} onChange={e => setUserForm({ ...userForm, phoneNumber: e.target.value })} />
-            </div>
-            <div className="col-span-2">
-              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Giriş Şifresi</label>
-              <input type="password" required className="w-full px-4 py-3 rounded-xl border border-slate-300 outline-none text-sm" placeholder="••••••••" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} />
-            </div>
-          </div>
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl shadow-md transition-colors text-sm">Kullanıcıyı Firmaya Bağla</button>
         </form>
       )}
     </div>
