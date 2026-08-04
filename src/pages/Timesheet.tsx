@@ -4,6 +4,12 @@ import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
+import OpeningAttachmentsPicker from '../components/OpeningAttachmentsPicker';
+import type { PendingOpeningAttachment } from '../utils/openingAttachments';
+import {
+  revokePendingPreviews,
+  uploadOpeningAttachments,
+} from '../utils/openingAttachments';
 
 // --- GÜÇLÜ TİP SÖZLEŞMELERİ (INTERFACE) ---
 interface CalendarWorkOrder {
@@ -57,6 +63,7 @@ export default function Timesheet() {
 
   // Form Çekmecesi Kontrolleri
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [openingAttachments, setOpeningAttachments] = useState<PendingOpeningAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [formData, setFormData] = useState({
     title: '', customerName: '', description: '', mobileDescription: '', address: '',
@@ -265,8 +272,9 @@ export default function Timesheet() {
     e.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
+    const attachmentsToUpload = [...openingAttachments];
     try {
-      await api.post('/workorders', {
+      const { data } = await api.post<{ id: string }>('/workorders', {
         title: formData.title, customerName: formData.customerName, description: formData.description,
         mobileDescription: formData.mobileDescription, address: formData.address, priority: formData.priority,
         type: formData.workType, category: formData.workCategory,
@@ -277,6 +285,16 @@ export default function Timesheet() {
         isPeriodic: formData.isPeriodic,
         recurrenceInterval: formData.isPeriodic ? formData.recurrenceInterval : 'None',
       });
+      if (data.id && attachmentsToUpload.length > 0) {
+        try {
+          await uploadOpeningAttachments(data.id, attachmentsToUpload);
+        } catch (uploadError) {
+          console.error(uploadError);
+          alert('İş emri oluşturuldu ancak açılış ekleri yüklenemedi.');
+        }
+      }
+      revokePendingPreviews(openingAttachments);
+      setOpeningAttachments([]);
       setIsDrawerOpen(false);
       setFormData((prev) => ({ ...prev, isPeriodic: false, recurrenceInterval: 'Haftalik' }));
       
@@ -451,7 +469,7 @@ export default function Timesheet() {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
               <div className="flex items-center gap-2"><span className="text-blue-600 font-bold">Takvim Planlama</span><span className="text-slate-400">›</span><span className="font-bold text-brand-navy text-sm">Hızlı İş Ekle</span></div>
-              <button type="button" onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
+              <button type="button" onClick={() => { revokePendingPreviews(openingAttachments); setOpeningAttachments([]); setIsDrawerOpen(false); }} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
             </div>
         
             <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-sm">
@@ -470,6 +488,11 @@ export default function Timesheet() {
             <div className="flex-1"><label className="block text-xs font-bold text-slate-600 mb-1">Boylam (Lng)</label><input type="number" step="any" required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
           </div>
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Genel Açıklama</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+          <OpeningAttachmentsPicker
+            attachments={openingAttachments}
+            onChange={setOpeningAttachments}
+            disabled={isSubmitting}
+          />
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Mühendis Açıklaması</label><textarea className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.mobileDescription} onChange={e => setFormData({...formData, mobileDescription: e.target.value})} /></div>
           <div><label className="block text-xs font-bold text-slate-600 mb-1">Tam Açık Adres</label><textarea required className="w-full border border-slate-300 rounded-lg p-2.5" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
 

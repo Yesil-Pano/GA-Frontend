@@ -1,5 +1,5 @@
 // src/pages/WorkOrders.tsx
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import api from '../services/api';
@@ -7,7 +7,9 @@ import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
 import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '../utils/dateTime';
 import { isSuperAdmin, saveAuthProfileFromMeResponse } from '../utils/authSession';
+import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
+import { isVideoContentType, OPENING_ATTACHMENT_CATEGORY } from '../utils/openingAttachments';
 
 interface WorkOrderData {
   id: string;
@@ -49,7 +51,9 @@ interface OrderPhoto {
   id: string;
   fileName: string;
   url: string;
-  category: 'ISG' | 'OPERASYON' | 'DIGER';
+  contentType: string;
+  isVideo: boolean;
+  category: 'ISG' | 'OPERASYON' | 'DIGER' | 'ACILIS';
 }
 
 interface StationLookup {
@@ -101,6 +105,14 @@ export default function WorkOrders() {
     stations: [],
     projects: [],
   });
+
+  const operationAssigneeOptions = useMemo(
+    () =>
+      isSuperAdminUser
+        ? mergeOfficeAndFieldPersonnel(lookups.officeUsers, lookups.personnel)
+        : lookups.officeUsers,
+    [isSuperAdminUser, lookups.officeUsers, lookups.personnel],
+  );
   
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -190,7 +202,7 @@ export default function WorkOrders() {
     revokePhotoUrls();
     setOrderPhotos([]);
     try {
-      const { data } = await api.get<Array<{ id: string; fileName: string; description?: string | null }>>(`/photos/WorkOrder/${workOrderId}`);
+      const { data } = await api.get<Array<{ id: string; fileName: string; contentType?: string; description?: string | null }>>(`/photos/WorkOrder/${workOrderId}`);
       const loaded = await Promise.all(
         data.map(async (photo) => {
           const res = await api.get(`/photos/${photo.id}/image`, { responseType: 'blob' });
@@ -198,11 +210,17 @@ export default function WorkOrders() {
           photoUrlsRef.current.push(url);
           const categoryValue = (photo.description ?? '').trim().toUpperCase();
           const category: OrderPhoto['category'] =
-            categoryValue === 'ISG' ? 'ISG' : categoryValue === 'OPERASYON' ? 'OPERASYON' : 'DIGER';
+            categoryValue === 'ISG' ? 'ISG'
+              : categoryValue === 'OPERASYON' ? 'OPERASYON'
+                : categoryValue === OPENING_ATTACHMENT_CATEGORY ? 'ACILIS'
+                  : 'DIGER';
+          const contentType = String(photo.contentType || res.headers['content-type'] || 'image/jpeg');
           return {
             id: photo.id,
             fileName: photo.fileName,
             url,
+            contentType,
+            isVideo: isVideoContentType(contentType),
             category,
           };
         }),
@@ -534,6 +552,8 @@ export default function WorkOrders() {
     }
   };
 
+  const openingPhotos = orderPhotos.filter((p) => p.category === 'ACILIS');
+
   const visiblePhotoCategories = (['ISG', 'OPERASYON', 'DIGER'] as const).filter((category) => {
     if (category === 'ISG') return canViewIsgPhotos;
     if (category === 'OPERASYON') return canViewOperationPhotos;
@@ -608,7 +628,7 @@ export default function WorkOrders() {
       try {
         const [ordersRes, lookupsRes] = await Promise.all([
           api.get('/workorders'),
-          api.get('/workorders/lookups')
+          api.get('/workorders/lookups', { params: { partnerKey: partnerKey || undefined } })
         ]);
         
         if (isMounted) {
@@ -819,6 +839,10 @@ export default function WorkOrders() {
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">Durum</span>
                     <span className="font-bold text-blue-600 truncate">{order.status || '-'}</span>
+                  </div>
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="text-slate-500 font-medium shrink-0 w-18">Genel Açıklama</span>
+                    <span className="text-slate-800 font-medium line-clamp-3 break-words">{order.description?.trim() || '—'}</span>
                   </div>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-slate-100">
@@ -1079,14 +1103,14 @@ export default function WorkOrders() {
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Operasyon Sorumlusu</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.operationUserId} onChange={(e) => setEditFormData({ ...editFormData, operationUserId: e.target.value })}>
                           <option value="">Seçiniz</option>
-                          {lookups.officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                          {operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">İş Açan Yetkili</label>
                         <select className="w-full border border-blue-300 rounded-lg p-2 bg-white" value={editFormData.openedByUserId} onChange={(e) => setEditFormData({ ...editFormData, openedByUserId: e.target.value })}>
                           <option value="">Seçiniz</option>
-                          {lookups.officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                          {operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                         </select>
                       </div>
                       {isSuperAdminUser && (
@@ -1174,6 +1198,38 @@ export default function WorkOrders() {
                 )}
               </div>
 
+              <div className="col-span-2 space-y-3">
+                <label className="block font-bold text-slate-500 uppercase tracking-wider">
+                  Açılış Ekleri ({openingPhotos.length})
+                </label>
+                {loadingPhotos ? (
+                  <p className="text-xs text-slate-400 italic">Yükleniyor...</p>
+                ) : openingPhotos.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-3">
+                    Açılış eki yok.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {openingPhotos.map((photo, photoIndex) => (
+                      <button
+                        key={photo.id}
+                        type="button"
+                        className="group relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-brand-orange transition text-left"
+                        title={photo.fileName}
+                        onClick={() => setLightbox({ photos: openingPhotos, index: photoIndex, title: 'Açılış Ekleri' })}
+                      >
+                        {photo.isVideo ? (
+                          <video src={photo.url} className="w-full h-28 object-cover bg-black" muted />
+                        ) : (
+                          <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                        )}
+                        <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="col-span-2 space-y-4">
                 {visiblePhotoCategories.map((category) => {
                   const photos = orderPhotos.filter((p) => p.category === category);
@@ -1205,7 +1261,11 @@ export default function WorkOrders() {
                                 title={photo.fileName}
                                 onClick={() => setLightbox({ photos, index: photoIndex, title })}
                               >
-                                <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                                {photo.isVideo ? (
+                                  <video src={photo.url} className="w-full h-28 object-cover bg-black" muted />
+                                ) : (
+                                  <img src={photo.url} alt={photo.fileName} className="w-full h-28 object-cover group-hover:opacity-90 transition" />
+                                )}
                                 <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
                               </button>
                               <button
@@ -1275,6 +1335,7 @@ export default function WorkOrders() {
                 {lightbox.title} · {lightbox.index + 1}/{lightbox.photos.length} · {lightbox.photos[lightbox.index].fileName}
               </p>
               <div className="flex items-center gap-2 shrink-0">
+                {lightbox.photos[lightbox.index].category !== 'ACILIS' && (
                 <button
                   type="button"
                   className="bg-rose-600 hover:bg-rose-700 px-3 py-1.5 rounded-lg text-xs font-bold"
@@ -1282,6 +1343,7 @@ export default function WorkOrders() {
                 >
                   Sil
                 </button>
+                )}
                 <button type="button" className="text-2xl font-bold px-2" onClick={() => setLightbox(null)}>×</button>
               </div>
             </div>
@@ -1299,11 +1361,20 @@ export default function WorkOrders() {
               >
                 ‹
               </button>
+              {lightbox.photos[lightbox.index].isVideo ? (
+                <video
+                  src={lightbox.photos[lightbox.index].url}
+                  controls
+                  autoPlay
+                  className="max-h-[75vh] w-full object-contain rounded-xl bg-black/40"
+                />
+              ) : (
               <img
                 src={lightbox.photos[lightbox.index].url}
                 alt={lightbox.photos[lightbox.index].fileName}
                 className="max-h-[75vh] w-full object-contain rounded-xl bg-black/40"
               />
+              )}
               <button
                 type="button"
                 className="text-white text-3xl font-bold px-3 py-8 hover:bg-white/10 rounded-xl"

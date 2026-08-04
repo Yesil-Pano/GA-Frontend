@@ -6,7 +6,14 @@ import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
 import { isSuperAdmin, getAuthProfile } from '../utils/authSession';
+import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
+import OpeningAttachmentsPicker from '../components/OpeningAttachmentsPicker';
+import type { PendingOpeningAttachment } from '../utils/openingAttachments';
+import {
+  revokePendingPreviews,
+  uploadOpeningAttachments,
+} from '../utils/openingAttachments';
 
 interface StationData {
   id: string;
@@ -68,6 +75,18 @@ const endOfDayLocal = () => {
   const pad = (x: number) => String(x).padStart(2, '0');
   return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}T18:00`;
 };
+
+const addHoursToLocalDatetime = (localStr: string, hours: number) => {
+  if (!localStr) return localStr;
+  const d = new Date(localStr);
+  if (Number.isNaN(d.getTime())) return localStr;
+  d.setHours(d.getHours() + hours);
+  const pad = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const endDateForWorkType = (type: string, startDate: string) =>
+  type === 'Arıza' ? addHoursToLocalDatetime(startDate, 24) : endOfDayLocal();
 
 const emptyStationForm = () => ({
   name: '',
@@ -163,6 +182,7 @@ export default function MapPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [openingAttachments, setOpeningAttachments] = useState<PendingOpeningAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lookupsLoaded, setLookupsLoaded] = useState(false);
   const [lookupsLoading, setLookupsLoading] = useState(false);
@@ -282,13 +302,21 @@ export default function MapPage() {
     type: 'Arıza',
     category: 'Arıza Bildirimi',
     startDate: nowLocal(),
-    endDate: endOfDayLocal(),
+    endDate: addHoursToLocalDatetime(nowLocal(), 24),
     operationUserId: '',
     openedByUserId: '',
     assignedToUserId: '',
     isPeriodic: false,
     recurrenceInterval: 'Haftalik',
   });
+
+  const operationAssigneeOptions = useMemo(
+    () =>
+      isSuperAdminUser
+        ? mergeOfficeAndFieldPersonnel(officeUsers, personnel)
+        : officeUsers,
+    [isSuperAdminUser, officeUsers, personnel],
+  );
 
   // Partner değişince lookups yeniden alınsın (toplu iş emri personeli güncel kalsın)
   useEffect(() => {
@@ -297,6 +325,22 @@ export default function MapPage() {
     setOfficeUsers([]);
   }, [partnerKey]);
 
+  const closeBulkModal = useCallback(() => {
+    setIsBulkOpen(false);
+    revokePendingPreviews(openingAttachments);
+    setOpeningAttachments([]);
+  }, [openingAttachments]);
+
+  useEffect(() => {
+    if (selectedIds.length !== 1) {
+      setOpeningAttachments((prev) => {
+        if (prev.length === 0) return prev;
+        revokePendingPreviews(prev);
+        return [];
+      });
+    }
+  }, [selectedIds.length]);
+
   // Lookups yalnızca toplu iş emri modalı açılınca — listeyi bloklamaz
   useEffect(() => {
     if (!isBulkOpen || lookupsLoaded) return;
@@ -304,7 +348,9 @@ export default function MapPage() {
     setLookupsLoading(true);
     (async () => {
       try {
-        const { data: backendData } = await api.get('/workorders/lookups');
+        const { data: backendData } = await api.get('/workorders/lookups', {
+          params: { partnerKey: partnerKey || undefined },
+        });
         if (cancelled) return;
         const mappedField = backendData?.teams
           ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
@@ -321,11 +367,14 @@ export default function MapPage() {
           setWorkCategories(backendData.categories);
         }
         const meId = getAuthProfile()?.userId;
+        const assigneePool = isSuperAdminUser
+          ? mergeOfficeAndFieldPersonnel(mappedOffice, mappedField)
+          : mappedOffice;
         const defaultOfficeId =
-          meId && mappedOffice.some((u: PersonnelLookup) => u.id === meId)
+          meId && assigneePool.some((u: PersonnelLookup) => u.id === meId)
             ? meId
-            : (mappedOffice[0]?.id ?? '');
-        if (mappedOffice.length > 0 || mappedField.length > 0) {
+            : (assigneePool[0]?.id ?? '');
+        if (assigneePool.length > 0 || mappedField.length > 0) {
           setBulkForm((prev) => ({
             ...prev,
             operationUserId: prev.operationUserId || defaultOfficeId,
@@ -418,6 +467,8 @@ export default function MapPage() {
       return;
     }
     setIsSubmitting(true);
+    const isSingle = selectedIds.length === 1;
+    const attachmentsToUpload = isSingle ? [...openingAttachments] : [];
     try {
       const { data } = await api.post('/workorders/bulk', {
         stationIds: selectedIds,
@@ -436,6 +487,17 @@ export default function MapPage() {
         isPeriodic: bulkForm.isPeriodic,
         recurrenceInterval: bulkForm.isPeriodic ? bulkForm.recurrenceInterval : 'None',
       });
+      const workOrderId = isSingle && Array.isArray(data.ids) ? data.ids[0] : null;
+      if (workOrderId && attachmentsToUpload.length > 0) {
+        try {
+          await uploadOpeningAttachments(workOrderId, attachmentsToUpload);
+        } catch (uploadError) {
+          console.error(uploadError);
+          alert('İş emri oluşturuldu ancak açılış ekleri yüklenemedi.');
+        }
+      }
+      revokePendingPreviews(openingAttachments);
+      setOpeningAttachments([]);
       setIsBulkOpen(false);
       setSelectedIds([]);
       alert(data.message || 'İş emirleri oluşturuldu.');
@@ -485,7 +547,12 @@ export default function MapPage() {
               type="button"
               disabled={selectedIds.length === 0}
               onClick={() => {
-                setBulkForm((p) => ({ ...p, startDate: nowLocal(), endDate: endOfDayLocal() }));
+                const start = nowLocal();
+                setBulkForm((p) => ({
+                  ...p,
+                  startDate: start,
+                  endDate: endDateForWorkType(p.type, start),
+                }));
                 setIsBulkOpen(true);
               }}
               className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-40"
@@ -569,7 +636,7 @@ export default function MapPage() {
                 <h2 className="font-bold text-brand-navy text-base">Toplu İş Emri</h2>
                 <p className="text-[11px] text-emerald-700 font-semibold">{selectedIds.length} nokta seçili</p>
               </div>
-              <button type="button" onClick={() => setIsBulkOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
+              <button type="button" onClick={closeBulkModal} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
             </div>
             <form onSubmit={handleBulkSubmit} className="flex-1 overflow-y-auto p-6 space-y-3 text-sm">
               {lookupsLoading && !lookupsLoaded && (
@@ -577,7 +644,14 @@ export default function MapPage() {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold mb-1">İş Tipi</label>
-                  <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={bulkForm.type} onChange={(e) => setBulkForm({ ...bulkForm, type: e.target.value })}>
+                  <select className="w-full border rounded-lg p-2.5 bg-slate-50" value={bulkForm.type} onChange={(e) => {
+                    const nextType = e.target.value;
+                    setBulkForm((prev) => ({
+                      ...prev,
+                      type: nextType,
+                      endDate: endDateForWorkType(nextType, prev.startDate),
+                    }));
+                  }}>
                     {workTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
@@ -588,10 +662,29 @@ export default function MapPage() {
                 </div>
                 <div><label className="block text-xs font-bold mb-1">Öncelik</label><select className="w-full border rounded-lg p-2.5" value={bulkForm.priority} onChange={(e) => setBulkForm({ ...bulkForm, priority: e.target.value })}><option>Düşük</option><option>Orta</option><option>Acil</option></select></div>
                 <div />
-                <div><label className="block text-xs font-bold mb-1">Planlanan Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => setBulkForm({ ...bulkForm, startDate: e.target.value })} /></div>
+                <div><label className="block text-xs font-bold mb-1">Planlanan Başlangıç</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.startDate} onChange={(e) => {
+                  const start = e.target.value;
+                  setBulkForm((prev) => ({
+                    ...prev,
+                    startDate: start,
+                    endDate: prev.type === 'Arıza' ? addHoursToLocalDatetime(start, 24) : prev.endDate,
+                  }));
+                }} /></div>
                 <div><label className="block text-xs font-bold mb-1">Planlanan Bitiş</label><input type="datetime-local" required className="w-full border rounded-lg p-2" value={bulkForm.endDate} onChange={(e) => setBulkForm({ ...bulkForm, endDate: e.target.value })} /></div>
               </div>
               <div><label className="block text-xs font-bold mb-1">Genel Açıklama</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.description} onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })} /></div>
+              {selectedIds.length === 1 && (
+                <OpeningAttachmentsPicker
+                  attachments={openingAttachments}
+                  onChange={setOpeningAttachments}
+                  disabled={isSubmitting}
+                />
+              )}
+              {selectedIds.length > 1 && (
+                <p className="text-[11px] text-slate-500 font-medium bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                  Birden fazla nokta seçili: açılış ekleri yalnızca tek iş emri açılırken yüklenebilir.
+                </p>
+              )}
               <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>
               <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
                 <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs">
@@ -609,8 +702,8 @@ export default function MapPage() {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
                 <div className={`grid grid-cols-1 gap-3 ${isSuperAdminUser ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{officeUsers.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
                   {isSuperAdminUser && (
                     <div>
                       <label className="block text-xs font-bold mb-1">İş Atanan Sahacı</label>
@@ -633,7 +726,7 @@ export default function MapPage() {
                 )}
               </div>
               <div className="flex gap-3 pt-3 border-t">
-                <button type="button" onClick={() => setIsBulkOpen(false)} className="flex-1 border rounded-xl py-3 font-bold hover:bg-slate-50">İptal</button>
+                <button type="button" onClick={closeBulkModal} className="flex-1 border rounded-xl py-3 font-bold hover:bg-slate-50">İptal</button>
                 <button type="submit" disabled={isSubmitting || (lookupsLoading && !lookupsLoaded)} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">
                   {isSubmitting ? 'Oluşturuluyor...' : `${selectedIds.length} İş Emri Aç`}
                 </button>
@@ -801,13 +894,16 @@ export default function MapPage() {
                 onClick={() => {
                   if (!selectedStation) return;
                   setSelectedIds([selectedStation.id]);
-                  setBulkForm((prev) => ({
-                    ...prev,
-                    title: `${selectedStation.name} iş emri`,
-                    address: selectedStation.address || '',
-                    startDate: nowLocal(),
-                    endDate: endOfDayLocal(),
-                  }));
+                  setBulkForm((prev) => {
+                    const start = nowLocal();
+                    return {
+                      ...prev,
+                      title: `${selectedStation.name} iş emri`,
+                      address: selectedStation.address || '',
+                      startDate: start,
+                      endDate: endDateForWorkType(prev.type, start),
+                    };
+                  });
                   closeStationDetail();
                   setIsBulkOpen(true);
                 }}
