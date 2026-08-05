@@ -456,7 +456,7 @@ export default function Teams() {
       setAllWorkOrders((prev) =>
         prev.map((o) =>
           o.id === jobId
-            ? { ...o, assignedToUserId: null, status: o.status }
+            ? { ...o, assignedToUserId: null, assignedToUserName: 'Atanmamış', status: 'Atanmamış' }
             : o
         )
       );

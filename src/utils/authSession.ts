@@ -157,3 +157,8 @@ export function canCloseWorkOrderFromOffice(profile?: AuthProfile | null): boole
   const officeRoles = ['TenantAdmin', 'OfficeUser', 'OperationReporter', 'IsgInspector'];
   return officeRoles.some((r) => hasRole(r, profile));
 }
+
+/** Web haritasından nokta ekleme — saha personeli hariç ofis rolleri + Super Admin */
+export function canManageStations(profile?: AuthProfile | null): boolean {
+  return canCloseWorkOrderFromOffice(profile);
+}

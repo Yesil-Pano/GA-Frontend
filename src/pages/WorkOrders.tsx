@@ -53,6 +53,39 @@ function isTerminalWorkOrderStatus(status: string): boolean {
   return s === 'tamamlandı' || s === 'iptal' || s === 'iptal edildi';
 }
 
+type WorkOrderStatusFilterKey =
+  | 'Atanmamış'
+  | 'Bekliyor'
+  | 'Devam Ediyor'
+  | 'Tamamlanan'
+  | 'İptal';
+
+const WORK_ORDER_STATUS_BADGES: {
+  key: WorkOrderStatusFilterKey;
+  label: string;
+  active: string;
+  idle: string;
+}[] = [
+  { key: 'Atanmamış', label: 'Atanmamış', active: 'bg-slate-700 text-white border-slate-700', idle: 'bg-slate-100 text-slate-700 border-slate-300 hover:border-slate-400' },
+  { key: 'Bekliyor', label: 'Bekliyor', active: 'bg-amber-500 text-white border-amber-500', idle: 'bg-amber-50 text-amber-800 border-amber-200 hover:border-amber-300' },
+  { key: 'Devam Ediyor', label: 'Devam Ediyor', active: 'bg-blue-600 text-white border-blue-600', idle: 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300' },
+  { key: 'Tamamlanan', label: 'Tamamlanan', active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-300' },
+  { key: 'İptal', label: 'İptal', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
+];
+
+function matchesWorkOrderStatusFilter(order: WorkOrderData, statusKey: WorkOrderStatusFilterKey): boolean {
+  if (statusKey === 'Atanmamış') {
+    return order.status === 'Atanmamış'
+      || !order.assignedToUserId
+      || !order.assignedToUserName
+      || order.assignedToUserName === ''
+      || order.assignedToUserName === 'Atanmamış';
+  }
+  if (statusKey === 'Tamamlanan') return order.status === 'Tamamlandı';
+  if (statusKey === 'İptal') return order.status === 'İptal Edildi' || order.status === 'İptal';
+  return order.status === statusKey;
+}
+
 interface OrderPhoto {
   id: string;
   fileName: string;
@@ -95,7 +128,9 @@ export default function WorkOrders() {
   const isSuperAdminUser = isSuperAdmin();
   const canOfficeClose = canCloseWorkOrderFromOffice();
 
-  const [filter, setFilter] = useState(isSuperAdminUser ? 'Atanmamış' : 'Tümü');
+  const [filter, setFilter] = useState<WorkOrderStatusFilterKey | null>(
+    isSuperAdminUser ? 'Atanmamış' : null,
+  );
   const [bulkAssignUserId, setBulkAssignUserId] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
@@ -137,8 +172,6 @@ export default function WorkOrders() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [isEditingDetail, setIsEditingDetail] = useState(false);
   const [isSavingDetail, setIsSavingDetail] = useState(false);
-  const [isOfficeCloseOpen, setIsOfficeCloseOpen] = useState(false);
-  const [officeCloseNote, setOfficeCloseNote] = useState('');
   const [isOfficeClosing, setIsOfficeClosing] = useState(false);
   /** TESLA: varsayılan EN; bayraklarla TR/EN */
   const [displayLang, setDisplayLang] = useState<'en' | 'tr'>('en');
@@ -173,21 +206,28 @@ export default function WorkOrders() {
   }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const filteredOrders = orders
-    .filter(order => {
-      if (filter === 'Tümü') return true;
-      if (filter === 'Atanmamış') {
-        return order.status === 'Atanmamış'
-          || !order.assignedToUserId
-          || !order.assignedToUserName
-          || order.assignedToUserName === ''
-          || order.assignedToUserName === 'Atanmamış';
-      }
-      if (filter === 'Tamamlanan') return order.status === 'Tamamlandı';
-      if (filter === 'İptal Edilen') return order.status === 'İptal Edildi';
-      return order.status === filter;
-    })
-    .filter(order => searchTerm === '' || trIncludes(order.title, searchTerm) || trIncludes(order.customerName, searchTerm));
+  const searchMatchedOrders = useMemo(
+    () => orders.filter(
+      (order) =>
+        searchTerm === ''
+        || trIncludes(order.title, searchTerm)
+        || trIncludes(order.customerName, searchTerm),
+    ),
+    [orders, searchTerm],
+  );
+
+  const statusCounts = useMemo(() => {
+    const counts = {} as Record<WorkOrderStatusFilterKey, number>;
+    for (const badge of WORK_ORDER_STATUS_BADGES) {
+      counts[badge.key] = searchMatchedOrders.filter((o) => matchesWorkOrderStatusFilter(o, badge.key)).length;
+    }
+    return counts;
+  }, [searchMatchedOrders]);
+
+  const filteredOrders = useMemo(() => {
+    if (!filter) return searchMatchedOrders;
+    return searchMatchedOrders.filter((order) => matchesWorkOrderStatusFilter(order, filter));
+  }, [searchMatchedOrders, filter]);
 
   const handleSelectAll = () => {
     if (selectedOrders.length === filteredOrders.length && filteredOrders.length > 0) {
@@ -329,41 +369,36 @@ export default function WorkOrders() {
     setAssignUserId('');
     setIsEditingDetail(false);
     setDisplayLang('tr');
-    setIsOfficeCloseOpen(false);
-    setOfficeCloseNote('');
   };
 
-  const handleOfficeClose = async () => {
-    if (!selectedOrder) return;
-    const note = officeCloseNote.trim();
-    if (!note) {
-      alert('Saha notu zorunludur.');
-      return;
-    }
-    if (!window.confirm('İş emri Tamamlandı olarak kapatılsın mı?')) return;
+  const handleOfficeClose = async (closeStatus: 'Tamamlandı' | 'İptal') => {
+    if (!selectedOrder || isOfficeClosing) return;
     setIsOfficeClosing(true);
     try {
       const { data } = await api.post<{
         message?: string;
         status?: string;
         completedAt?: string | null;
+        cancelledAt?: string | null;
         fieldNote?: string;
         fieldNoteAddedAt?: string | null;
-      }>(`/workorders/${selectedOrder.id}/office-close`, { fieldNote: note });
+      }>(`/workorders/${selectedOrder.id}/office-close`, { status: closeStatus });
       const updated: WorkOrderData = {
         ...selectedOrder,
-        status: data.status ?? 'Tamamlandı',
-        completedAt: data.completedAt ?? selectedOrder.completedAt,
-        fieldNote: data.fieldNote ?? note,
-        fieldNoteAddedAt: data.fieldNoteAddedAt ?? null,
+        status: data.status ?? closeStatus,
+        completedAt: closeStatus === 'Tamamlandı'
+          ? (data.completedAt ?? selectedOrder.completedAt)
+          : selectedOrder.completedAt,
+        cancelledAt: closeStatus === 'İptal'
+          ? (data.cancelledAt ?? selectedOrder.cancelledAt)
+          : selectedOrder.cancelledAt,
+        fieldNote: data.fieldNote ?? selectedOrder.fieldNote,
+        fieldNoteAddedAt: data.fieldNoteAddedAt ?? selectedOrder.fieldNoteAddedAt,
         fieldNoteEn: null,
       };
       setSelectedOrder(updated);
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
-      setIsOfficeCloseOpen(false);
-      setOfficeCloseNote('');
       await refreshMapData();
-      alert(data.message || 'İş emri kapatıldı.');
     } catch (error: unknown) {
       console.error('Ofisten kapatma başarısız:', error);
       const msg =
@@ -451,7 +486,6 @@ export default function WorkOrders() {
       if (updated.position) {
         setFocusedMarkerPosition([...updated.position]);
       }
-      alert(data.message || 'İş emri güncellendi.');
 
       if (isTeslaOrder(updated) && displayLang === 'en') {
         const translated = await ensureTranslation(updated);
@@ -504,7 +538,6 @@ export default function WorkOrders() {
         openedByUserId: data.openedByUserId || prev.openedByUserId,
       }));
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
-      alert(data.message || 'Atama güncellendi.');
     } catch (error) {
       console.error('Atama başarısız:', error);
       alert('Personel ataması yapılamadı.');
@@ -803,19 +836,30 @@ export default function WorkOrders() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full min-w-0 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-brand-orange focus:ring-2 focus:ring-brand-orange/20"
         />
-        <div className="flex gap-2 items-center min-w-0">
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="min-w-0 flex-1 border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-brand-orange bg-slate-50 cursor-pointer"
-          >
-            <option value="Tümü">Tüm İşler</option>
-            <option value="Bekliyor">Bekliyor</option>
-            <option value="Devam Ediyor">Devam Ediyor</option>
-            <option value="Tamamlanan">Tamamlanan</option>
-            <option value="İptal Edilen">İptal Edilen</option>
-            <option value="Atanmamış">Atanmamış İşler</option>
-          </select>
+        <div className="flex flex-wrap gap-2 items-center min-w-0">
+          {WORK_ORDER_STATUS_BADGES.map((badge) => {
+            const isActive = filter === badge.key;
+            const count = statusCounts[badge.key] ?? 0;
+            return (
+              <button
+                key={badge.key}
+                type="button"
+                onClick={() => setFilter((prev) => (prev === badge.key ? null : badge.key))}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                  isActive ? badge.active : badge.idle
+                }`}
+              >
+                <span>{badge.label}</span>
+                <span
+                  className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-center ${
+                    isActive ? 'bg-white/25 text-white' : 'bg-white/80 text-slate-700'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1359,42 +1403,6 @@ export default function WorkOrders() {
                 )}
               </div>
             </div>
-            {isOfficeCloseOpen && !isEditingDetail && selectedOrder && !isTerminalWorkOrderStatus(selectedOrder.status) && (
-              <div className="px-6 py-4 border-t border-amber-200 bg-amber-50">
-                <h3 className="text-sm font-bold text-amber-900 mb-2">İş Emri Kapat — Tamamlandı</h3>
-                <p className="text-xs text-amber-800 mb-3">
-                  Yanlış alarm dahil tüm durumlarda iş emri Tamamlandı olarak kapatılır. Saha notu zorunludur.
-                </p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Saha Notu *</label>
-                <textarea
-                  value={officeCloseNote}
-                  onChange={(e) => setOfficeCloseNote(e.target.value)}
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
-                  placeholder="Kapanış açıklaması (ör. yanlış alarm, müdahale özeti…)"
-                />
-                <div className="flex justify-end gap-2 mt-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsOfficeCloseOpen(false);
-                      setOfficeCloseNote('');
-                    }}
-                    className="border border-slate-300 text-slate-600 font-bold px-4 py-2 rounded-xl hover:bg-white transition text-sm"
-                  >
-                    Vazgeç
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOfficeClose}
-                    disabled={isOfficeClosing || !officeCloseNote.trim()}
-                    className="bg-emerald-600 text-white font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 shadow transition disabled:opacity-60 text-sm"
-                  >
-                    {isOfficeClosing ? 'Kapatılıyor…' : 'Tamamlandı Olarak Kapat'}
-                  </button>
-                </div>
-              </div>
-            )}
             <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
               {isEditingDetail ? (
                 <>
@@ -1417,13 +1425,24 @@ export default function WorkOrders() {
               ) : (
                 <>
                   {canOfficeClose && selectedOrder && !isTerminalWorkOrderStatus(selectedOrder.status) && (
-                    <button
-                      type="button"
-                      onClick={() => setIsOfficeCloseOpen((v) => !v)}
-                      className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 shadow transition mr-auto"
-                    >
-                      ✅ İş Emri Kapat
-                    </button>
+                    <div className="flex flex-wrap gap-2 mr-auto">
+                      <button
+                        type="button"
+                        onClick={() => handleOfficeClose('Tamamlandı')}
+                        disabled={isOfficeClosing}
+                        className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 shadow transition disabled:opacity-60 text-sm"
+                      >
+                        {isOfficeClosing ? 'Kapatılıyor…' : 'Tamamlandı Olarak Kapat'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOfficeClose('İptal')}
+                        disabled={isOfficeClosing}
+                        className="bg-rose-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-rose-700 shadow transition disabled:opacity-60 text-sm"
+                      >
+                        {isOfficeClosing ? 'Kapatılıyor…' : 'İptal Olarak Kapat'}
+                      </button>
+                    </div>
                   )}
                   <button
                     type="button"

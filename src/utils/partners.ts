@@ -3,52 +3,42 @@ import teslaLogo from '../assets/tesla-logo.png';
 import yesilPanoLogo from '../assets/yesil-pano-logo.png';
 import astorLogo from '../assets/astor-sarj-logo.jpg';
 
-export type RealPartnerKey = 'trugo' | 'tesla' | 'astor' | 'yesilpano';
-export type PartnerKey = RealPartnerKey | 'all';
+/** Super Admin firma seçici anahtarı. 'all' = TÜMÜ. */
+export type PartnerKey = string;
 
 export interface PartnerOption {
   key: PartnerKey;
   name: string;
   letter: string;
-  /** Varsa tenant UUID — Super Admin filtre + tenant admin kilidi */
   tenantId: string | null;
-  /** OwnerCompany / isim eşlemesi */
   tokens: string[];
-  /** Harita / rozet rengi (TÜMÜ için nötr) */
   color: string;
 }
 
-/** Sağ üst header logoları (TÜMÜ için logo yok) */
-export const PARTNER_LOGOS: Record<RealPartnerKey, string> = {
+export interface PartnerApiItem {
+  key: string;
+  name: string;
+  letter: string;
+  tenantId: string | null;
+  tokens: string[];
+}
+
+const KNOWN_LOGOS: Record<string, string> = {
   trugo: trugoLogo,
   tesla: teslaLogo,
   yesilpano: yesilPanoLogo,
   astor: astorLogo,
 };
 
-export function getPartnerLogo(key: PartnerKey | null | undefined): string | null {
-  if (!key || key === 'all') return null;
-  return PARTNER_LOGOS[key] ?? null;
-}
-
-/** JWT TenantId → partner (tenant kullanıcıları için logo kilidi) */
-export function getPartnerByTenantId(tenantId: string | null | undefined): PartnerOption | null {
-  if (!tenantId) return null;
-  const found = PARTNERS.find(
-    (p) => p.tenantId && p.tenantId.toLowerCase() === tenantId.toLowerCase(),
-  );
-  return found ?? null;
-}
-
-/** Firma renkleri (Super Admin harita) */
-export const PARTNER_COLORS: Record<RealPartnerKey, string> = {
-  yesilpano: '#000000', // Siyah
-  trugo: '#2563EB', // Mavi
-  tesla: '#DC2626', // Kırmızı
-  astor: '#16A34A', // Yeşil
+const KNOWN_COLORS: Record<string, string> = {
+  yesilpano: '#000000',
+  trugo: '#2563EB',
+  tesla: '#DC2626',
+  astor: '#16A34A',
 };
 
-/** Rezerv (şimdilik kullanılmıyor) */
+const FALLBACK_COLORS = ['#2563EB', '#DC2626', '#16A34A', '#CA8A04', '#9333EA', '#0891B2', '#EA580C'];
+
 export const RESERVED_PARTNER_COLORS = {
   yellow: '#EAB308',
   gray: '#6B7280',
@@ -58,40 +48,29 @@ export const RESERVED_PARTNER_COLORS = {
 export const MIXED_CLUSTER_COLOR = RESERVED_PARTNER_COLORS.gray;
 export const UNKNOWN_PARTNER_COLOR = RESERVED_PARTNER_COLORS.gray;
 
-export const PARTNERS: PartnerOption[] = [
-  {
-    key: 'trugo',
-    name: 'Trugo Şarj İstasyonları',
-    letter: 'T',
-    tenantId: 'c92cc573-957b-4862-8ae7-ff380efd15ce',
-    tokens: ['trugo'],
-    color: PARTNER_COLORS.trugo,
-  },
-  {
-    key: 'tesla',
-    name: 'TESLA',
-    letter: 'S',
-    tenantId: null,
-    // Eski Unilever Algida verisi + yeni TESLA adı
-    tokens: ['tesla', 'unilever', 'algida'],
-    color: PARTNER_COLORS.tesla,
-  },
-  {
-    key: 'astor',
-    name: 'Astor Enerji',
-    letter: 'E',
-    tenantId: null,
-    tokens: ['astor'],
-    color: PARTNER_COLORS.astor,
-  },
-  {
-    key: 'yesilpano',
-    name: 'Yeşil Pano Projesi',
-    letter: 'Y',
-    tenantId: '475e2c63-5dca-41c8-ba0e-fd86917f32f0',
-    tokens: ['yeşil', 'yesil'],
-    color: PARTNER_COLORS.yesilpano,
-  },
+export function getPartnerLogo(key: PartnerKey | null | undefined): string | null {
+  if (!key || key === 'all') return null;
+  return KNOWN_LOGOS[key.toLowerCase()] ?? null;
+}
+
+function hashColor(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = key.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return FALLBACK_COLORS[Math.abs(hash) % FALLBACK_COLORS.length];
+}
+
+export function getPartnerColor(key: PartnerKey | null | undefined): string {
+  if (!key || key === 'all') return UNKNOWN_PARTNER_COLOR;
+  return KNOWN_COLORS[key.toLowerCase()] ?? hashColor(key.toLowerCase());
+}
+
+const STATIC_PARTNERS: PartnerOption[] = [
+  { key: 'trugo', name: 'TRUGO', letter: 'T', tenantId: 'c92cc573-957b-4862-8ae7-ff380efd15ce', tokens: ['trugo'], color: KNOWN_COLORS.trugo },
+  { key: 'tesla', name: 'TESLA', letter: 'T', tenantId: null, tokens: ['tesla', 'unilever', 'algida'], color: KNOWN_COLORS.tesla },
+  { key: 'astor', name: 'Astor Enerji', letter: 'A', tenantId: null, tokens: ['astor'], color: KNOWN_COLORS.astor },
+  { key: 'yesilpano', name: 'Yeşil Pano', letter: 'Y', tenantId: '475e2c63-5dca-41c8-ba0e-fd86917f32f0', tokens: ['yeşil', 'yesil'], color: KNOWN_COLORS.yesilpano },
 ];
 
 export const ALL_PARTNER: PartnerOption = {
@@ -103,8 +82,50 @@ export const ALL_PARTNER: PartnerOption = {
   color: MIXED_CLUSTER_COLOR,
 };
 
-/** Super Admin seçicide: TÜMÜ + firmalar */
-export const SUPER_ADMIN_PARTNERS: PartnerOption[] = [ALL_PARTNER, ...PARTNERS];
+let partners: PartnerOption[] = [...STATIC_PARTNERS];
+let superAdminPartners: PartnerOption[] = [ALL_PARTNER, ...partners];
+
+function mapApiItemToPartner(item: PartnerApiItem): PartnerOption | null {
+  if (item.key === 'all') return null;
+  const key = item.key.trim().toLowerCase();
+  if (!key) return null;
+  return {
+    key,
+    name: item.name,
+    letter: item.letter || item.name.trim()[0]?.toUpperCase() || '?',
+    tenantId: item.tenantId,
+    tokens: item.tokens ?? [],
+    color: getPartnerColor(key),
+  };
+}
+
+/** GET /api/partners yanıtını UI listesine uygular (kaynak: Tenants tablosu). */
+export function applyPartnerApiData(apiItems: PartnerApiItem[]) {
+  if (!Array.isArray(apiItems) || apiItems.length === 0) return;
+
+  const merged = apiItems
+    .map(mapApiItemToPartner)
+    .filter((p): p is PartnerOption => p != null);
+
+  if (merged.length === 0) return;
+
+  partners = merged;
+  const allFromApi = apiItems.find((p) => p.key === 'all');
+  superAdminPartners = [
+    allFromApi
+      ? { ...ALL_PARTNER, name: allFromApi.name, letter: allFromApi.letter || ALL_PARTNER.letter }
+      : ALL_PARTNER,
+    ...partners,
+  ];
+}
+
+export function getPartnersList(): PartnerOption[] {
+  return partners;
+}
+
+export function getSuperAdminPartnersList(): PartnerOption[] {
+  return superAdminPartners;
+}
 
 export const DEFAULT_PARTNER = ALL_PARTNER;
 
@@ -113,7 +134,9 @@ const STORAGE_KEY = 'ga_active_partner_key';
 function migratePartnerKey(raw: string | null): PartnerKey | null {
   if (!raw) return null;
   if (raw === 'unilever') return 'tesla';
-  if (raw === 'all' || PARTNERS.some((p) => p.key === raw)) return raw as PartnerKey;
+  if (raw === 'all') return 'all';
+  const normalized = raw.trim().toLowerCase();
+  if (getPartnersList().some((p) => p.key === normalized)) return normalized;
   return null;
 }
 
@@ -129,17 +152,21 @@ export function getStoredPartnerKey(): PartnerKey {
 }
 
 export function storePartnerKey(key: PartnerKey) {
-  localStorage.setItem(STORAGE_KEY, key);
+  localStorage.setItem(STORAGE_KEY, key === 'all' ? 'all' : key.trim().toLowerCase());
 }
 
 export function getPartnerByKey(key: PartnerKey): PartnerOption {
   if (key === 'all') return ALL_PARTNER;
-  return PARTNERS.find((p) => p.key === key) ?? DEFAULT_PARTNER;
+  const normalized = key.trim().toLowerCase();
+  return getPartnersList().find((p) => p.key === normalized) ?? ALL_PARTNER;
 }
 
-export function getPartnerColor(key: PartnerKey | null | undefined): string {
-  if (!key || key === 'all') return UNKNOWN_PARTNER_COLOR;
-  return PARTNER_COLORS[key] ?? UNKNOWN_PARTNER_COLOR;
+export function getPartnerByTenantId(tenantId: string | null | undefined): PartnerOption | null {
+  if (!tenantId) return null;
+  const found = getPartnersList().find(
+    (p) => p.tenantId && p.tenantId.toLowerCase() === tenantId.toLowerCase(),
+  );
+  return found ?? null;
 }
 
 export function matchesPartner(
@@ -150,8 +177,7 @@ export function matchesPartner(
 
   const hay = `${opts.ownerCompany ?? ''} ${opts.name ?? ''}`.toLocaleLowerCase('tr-TR');
 
-  // OwnerCompany / isim token eşlemesi TenantId'den önce gelir
-  for (const p of PARTNERS) {
+  for (const p of getPartnersList()) {
     if (p.tokens.some((t) => hay.includes(t.toLocaleLowerCase('tr-TR')))) {
       return p.key === partner.key;
     }
@@ -163,25 +189,24 @@ export function matchesPartner(
   return false;
 }
 
-/** İstasyon / iş emri / ekip kaydından firma anahtarı çıkarır */
 export function resolvePartnerKey(opts: {
   tenantId?: string | null;
   ownerCompany?: string | null;
   name?: string | null;
-}): RealPartnerKey | null {
+}): string | null {
   const hay = `${opts.ownerCompany ?? ''} ${opts.name ?? ''}`.toLocaleLowerCase('tr-TR');
 
-  for (const p of PARTNERS) {
+  for (const p of getPartnersList()) {
     if (p.tokens.some((t) => hay.includes(t.toLocaleLowerCase('tr-TR')))) {
-      return p.key as RealPartnerKey;
+      return p.key;
     }
   }
 
   if (opts.tenantId) {
-    const byTenant = PARTNERS.find(
+    const byTenant = getPartnersList().find(
       (p) => p.tenantId && p.tenantId.toLowerCase() === opts.tenantId!.toLowerCase(),
     );
-    if (byTenant) return byTenant.key as RealPartnerKey;
+    if (byTenant) return byTenant.key;
   }
 
   return null;

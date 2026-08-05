@@ -3,9 +3,10 @@ import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import api from '../services/api';
+import axios from 'axios';
 import { trIncludes } from '../utils/trSearch';
-import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
-import { isSuperAdmin, getAuthProfile } from '../utils/authSession';
+import { getPartnerByKey, getPartnerColor, resolvePartnerKey, type PartnerKey } from '../utils/partners';
+import { isSuperAdmin, getAuthProfile, canManageStations } from '../utils/authSession';
 import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
 import OpeningAttachmentsPicker from '../components/OpeningAttachmentsPicker';
@@ -99,6 +100,7 @@ const emptyStationForm = () => ({
   address: '',
   pointType: SELECT_PLACEHOLDER,
   city: SELECT_PLACEHOLDER,
+  tenantId: SELECT_PLACEHOLDER,
   lat: 39.92,
   lng: 32.85,
 });
@@ -209,6 +211,12 @@ export default function MapPage() {
 
   const { setFocusedMarkerPosition, refreshMapData, partnerKey, mapStations, isMapStationsLoading } =
     useOutletContext<MapPageOutletContext>();
+
+  const canAddStation =
+    canManageStations() && (!isSuperAdminUser || (partnerKey && partnerKey !== 'all'));
+
+  const activePartnerForStation =
+    partnerKey && partnerKey !== 'all' ? getPartnerByKey(partnerKey as PartnerKey) : null;
 
   const stations = useMemo(
     () => (Array.isArray(mapStations) ? mapStations : []) as StationData[],
@@ -342,7 +350,7 @@ export default function MapPage() {
     }
   }, [selectedIds.length]);
 
-  // Lookups yalnızca toplu iş emri modalı açılınca — listeyi bloklamaz
+  // Partner değişince lookups yeniden alınsın (toplu iş emri personeli güncel kalsın)
   useEffect(() => {
     if (!isBulkOpen || lookupsLoaded) return;
     let cancelled = false;
@@ -434,6 +442,16 @@ export default function MapPage() {
     }
   };
 
+  const openStationForm = () => {
+    const partner =
+      partnerKey && partnerKey !== 'all' ? getPartnerByKey(partnerKey as PartnerKey) : null;
+    setFormData({
+      ...emptyStationForm(),
+      tenantId: partner?.tenantId ?? SELECT_PLACEHOLDER,
+    });
+    setIsFormOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -441,17 +459,39 @@ export default function MapPage() {
       alert('Lütfen tüm zorunlu seçim alanlarını doldurun (Seçiniz bırakmayın).');
       return;
     }
+    if (isSuperAdminUser && !formData.tenantId) {
+      alert('Firma seçimi için sol üstten bir firma seçin.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await api.post('/stations', {
-        ...formData, latitude: Number(formData.lat), longitude: Number(formData.lng)
-      });
+      const payload: Record<string, unknown> = {
+        name: formData.name,
+        statusType: formData.statusType,
+        powerType: formData.powerType,
+        personnelName: formData.personnelName,
+        personnelPhone: formData.personnelPhone,
+        edas: formData.edas,
+        address: formData.address,
+        pointType: formData.pointType,
+        city: formData.city,
+        latitude: Number(formData.lat),
+        longitude: Number(formData.lng),
+      };
+      if (isSuperAdminUser && formData.tenantId) {
+        payload.tenantId = formData.tenantId;
+      }
+      await api.post('/stations', payload);
       setIsFormOpen(false);
       setFormData(emptyStationForm());
       await refreshMapData?.();
     } catch (error) {
       console.error(error);
-      alert('Nokta eklenemedi.');
+      const msg =
+        axios.isAxiosError(error) && typeof error.response?.data?.message === 'string'
+          ? error.response.data.message
+          : 'Nokta eklenemedi.';
+      alert(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -501,7 +541,6 @@ export default function MapPage() {
       setOpeningAttachments([]);
       setIsBulkOpen(false);
       setSelectedIds([]);
-      alert(data.message || 'İş emirleri oluşturuldu.');
       navigate('/work-orders');
     } catch (error) {
       console.error(error);
@@ -560,9 +599,11 @@ export default function MapPage() {
             >
               Toplu İş Emri ({selectedIds.length})
             </button>
-            <button type="button" onClick={() => { setFormData(emptyStationForm()); setIsFormOpen(true); }} className="px-3 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">
-              + Nokta Ekle
-            </button>
+            {canAddStation && (
+              <button type="button" onClick={openStationForm} className="px-3 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">
+                + Nokta Ekle
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -606,6 +647,14 @@ export default function MapPage() {
               <button type="button" onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-rose-600 font-bold text-2xl px-2">×</button>
             </div>
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar text-sm">
+              {isSuperAdminUser && activePartnerForStation && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Firma</label>
+                  <div className="w-full border rounded-lg p-2.5 bg-slate-100 text-slate-700 font-medium">
+                    {activePartnerForStation.name}
+                  </div>
+                </div>
+              )}
               <div><label className="block text-xs font-bold text-slate-700 mb-1">İstasyon Adı</label><input required className="w-full border rounded-lg p-2.5" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Durum Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.statusType} onChange={e => setFormData({...formData, statusType: e.target.value})}><option value="">Seçiniz</option><option value="Bakıma Dahil">Bakıma Dahil</option><option value="Bakım Dışı">Bakım Dışı</option></select></div>

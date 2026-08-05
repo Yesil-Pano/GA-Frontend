@@ -7,12 +7,13 @@ import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';
 import {
-  SUPER_ADMIN_PARTNERS,
+  applyPartnerApiData,
   getPartnerByKey,
   getPartnerByTenantId,
   getPartnerColor,
   getPartnerLogo,
   getStoredPartnerKey,
+  getSuperAdminPartnersList,
   resolvePartnerKey,
   storePartnerKey,
   type PartnerKey,
@@ -85,6 +86,9 @@ export default function MainLayout() {
   const [selectedPartner, setSelectedPartner] = useState<PartnerOption>(() =>
     getPartnerByKey(getStoredPartnerKey()),
   );
+  const [superAdminPartners, setSuperAdminPartners] = useState<PartnerOption[]>(() =>
+    getSuperAdminPartnersList(),
+  );
   const activePartner = lockedTenantPartner ?? selectedPartner;
 
   const fetchNotifications = useCallback(async () => {
@@ -108,6 +112,29 @@ export default function MainLayout() {
       })
       .catch(() => { /* ignore */ });
   }, []);
+
+  useEffect(() => {
+    if (!isSuperAdminUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get<Array<{
+          key: string;
+          name: string;
+          letter: string;
+          tenantId: string | null;
+          tokens: string[];
+        }>>('/partners');
+        if (cancelled || !Array.isArray(data)) return;
+        applyPartnerApiData(data);
+        setSuperAdminPartners(getSuperAdminPartnersList());
+        setSelectedPartner((prev) => getPartnerByKey(prev.key as PartnerKey));
+      } catch (error) {
+        console.error('Firma listesi alınamadı:', error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isSuperAdminUser]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -403,7 +430,7 @@ export default function MainLayout() {
 
             {isPartnerDropdownOpen && isMenuOpen && (
               <div className="absolute left-3 right-3 mt-1 bg-[#1A233A] border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 text-xs">
-                {SUPER_ADMIN_PARTNERS.map((partner) => (
+                {superAdminPartners.map((partner) => (
                   <button
                     key={partner.key}
                     onClick={() => handlePartnerSelect(partner)}
