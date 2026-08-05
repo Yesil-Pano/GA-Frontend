@@ -9,6 +9,7 @@ import type { PendingOpeningAttachment } from '../utils/openingAttachments';
 import {
   revokePendingPreviews,
   uploadOpeningAttachments,
+  formatOpeningUploadError,
 } from '../utils/openingAttachments';
 
 // --- GÜÇLÜ TİP SÖZLEŞMELERİ (INTERFACE) ---
@@ -290,7 +291,7 @@ export default function Timesheet() {
           await uploadOpeningAttachments(data.id, attachmentsToUpload);
         } catch (uploadError) {
           console.error(uploadError);
-          alert('İş emri oluşturuldu ancak açılış ekleri yüklenemedi.');
+          alert(`İş emri oluşturuldu ancak ${formatOpeningUploadError(uploadError)}`);
         }
       }
       revokePendingPreviews(openingAttachments);
@@ -536,6 +537,15 @@ export default function Timesheet() {
                   <option value="">Atanmamış (sonra ata)</option>
                   {lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                 </select>
+                {formData.assignedToUserId ? (
+                  <p className="text-[10px] text-emerald-700 font-medium mt-1.5">
+                    Seçilen saha personeline otomatik atanır; iş emri Bekliyor durumunda açılır.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-slate-600 font-medium mt-1.5">
+                    Boş bırakılırsa iş emri Atanmamış açılır.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-[11px] text-slate-600 font-medium">

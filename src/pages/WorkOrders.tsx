@@ -6,7 +6,7 @@ import api from '../services/api';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, resolvePartnerKey } from '../utils/partners';
 import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '../utils/dateTime';
-import { isSuperAdmin, saveAuthProfileFromMeResponse } from '../utils/authSession';
+import { isSuperAdmin, canCloseWorkOrderFromOffice, saveAuthProfileFromMeResponse } from '../utils/authSession';
 import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
 import { isVideoContentType, OPENING_ATTACHMENT_CATEGORY } from '../utils/openingAttachments';
@@ -45,6 +45,12 @@ interface WorkOrderData {
   fieldNoteEn?: string | null;
   translationProvider?: string | null;
   translatedAt?: string | null;
+  createdAt?: string | null;
+}
+
+function isTerminalWorkOrderStatus(status: string): boolean {
+  const s = (status || '').toLowerCase();
+  return s === 'tamamlandı' || s === 'iptal' || s === 'iptal edildi';
 }
 
 interface OrderPhoto {
@@ -87,6 +93,7 @@ interface LookupData {
 
 export default function WorkOrders() {
   const isSuperAdminUser = isSuperAdmin();
+  const canOfficeClose = canCloseWorkOrderFromOffice();
 
   const [filter, setFilter] = useState(isSuperAdminUser ? 'Atanmamış' : 'Tümü');
   const [bulkAssignUserId, setBulkAssignUserId] = useState('');
@@ -130,6 +137,9 @@ export default function WorkOrders() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [isEditingDetail, setIsEditingDetail] = useState(false);
   const [isSavingDetail, setIsSavingDetail] = useState(false);
+  const [isOfficeCloseOpen, setIsOfficeCloseOpen] = useState(false);
+  const [officeCloseNote, setOfficeCloseNote] = useState('');
+  const [isOfficeClosing, setIsOfficeClosing] = useState(false);
   /** TESLA: varsayılan EN; bayraklarla TR/EN */
   const [displayLang, setDisplayLang] = useState<'en' | 'tr'>('en');
   const [isTranslating, setIsTranslating] = useState(false);
@@ -319,6 +329,51 @@ export default function WorkOrders() {
     setAssignUserId('');
     setIsEditingDetail(false);
     setDisplayLang('tr');
+    setIsOfficeCloseOpen(false);
+    setOfficeCloseNote('');
+  };
+
+  const handleOfficeClose = async () => {
+    if (!selectedOrder) return;
+    const note = officeCloseNote.trim();
+    if (!note) {
+      alert('Saha notu zorunludur.');
+      return;
+    }
+    if (!window.confirm('İş emri Tamamlandı olarak kapatılsın mı?')) return;
+    setIsOfficeClosing(true);
+    try {
+      const { data } = await api.post<{
+        message?: string;
+        status?: string;
+        completedAt?: string | null;
+        fieldNote?: string;
+        fieldNoteAddedAt?: string | null;
+      }>(`/workorders/${selectedOrder.id}/office-close`, { fieldNote: note });
+      const updated: WorkOrderData = {
+        ...selectedOrder,
+        status: data.status ?? 'Tamamlandı',
+        completedAt: data.completedAt ?? selectedOrder.completedAt,
+        fieldNote: data.fieldNote ?? note,
+        fieldNoteAddedAt: data.fieldNoteAddedAt ?? null,
+        fieldNoteEn: null,
+      };
+      setSelectedOrder(updated);
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+      setIsOfficeCloseOpen(false);
+      setOfficeCloseNote('');
+      await refreshMapData();
+      alert(data.message || 'İş emri kapatıldı.');
+    } catch (error: unknown) {
+      console.error('Ofisten kapatma başarısız:', error);
+      const msg =
+        axios.isAxiosError(error) && typeof error.response?.data?.message === 'string'
+          ? error.response.data.message
+          : 'İş emri kapatılamadı.';
+      alert(msg);
+    } finally {
+      setIsOfficeClosing(false);
+    }
   };
 
   const handleSaveDetail = async () => {
@@ -365,6 +420,7 @@ export default function WorkOrders() {
         priority: data.priority,
         type: data.type,
         category: data.category,
+        status: data.status ?? selectedOrder.status,
         startDate: data.startDate,
         endDate: data.endDate,
         position: data.position,
@@ -419,6 +475,7 @@ export default function WorkOrders() {
     try {
       const { data } = await api.put<{
         message: string;
+        status?: string;
         assignedToUserId: string | null;
         assignedToUserName: string;
         operationUserId?: string | null;
@@ -431,6 +488,7 @@ export default function WorkOrders() {
 
       const updated: WorkOrderData = {
         ...selectedOrder,
+        status: data.status ?? (assignUserId ? 'Bekliyor' : 'Atanmamış'),
         assignedToUserId: data.assignedToUserId,
         assignedToUserName: data.assignedToUserName,
         operationUserId: data.operationUserId ?? selectedOrder.operationUserId,
@@ -840,6 +898,12 @@ export default function WorkOrders() {
                     <span className="text-slate-500 font-medium shrink-0 w-18">Durum</span>
                     <span className="font-bold text-blue-600 truncate">{order.status || '-'}</span>
                   </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-medium shrink-0 w-18">Açılış Tarihi</span>
+                    <span className="text-slate-800 font-medium truncate">
+                      {order.createdAt ? formatTurkeyDateTime(order.createdAt) : '—'}
+                    </span>
+                  </div>
                   <div className="flex items-start gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">Genel Açıklama</span>
                     <span className="text-slate-800 font-medium line-clamp-3 break-words">{order.description?.trim() || '—'}</span>
@@ -1156,8 +1220,13 @@ export default function WorkOrders() {
               )}
 
               {!isEditingDetail && isSuperAdminUser && (
+                selectedOrder.status === 'Atanmamış' || !selectedOrder.assignedToUserId
+              ) && (
                 <div className="col-span-2 bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-3">
-                  <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wider">Sahacı Ata / Değiştir</label>
+                  <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wider">Sahacı Ata</label>
+                  <p className="text-[11px] text-emerald-800/80 font-medium">
+                    Atama kaydedildiğinde iş emri Bekliyor durumuna geçer ve saha personeline bildirim gider.
+                  </p>
                   <div className="flex gap-2 items-center">
                     <select
                       className="flex-1 border border-emerald-200 rounded-lg p-2.5 bg-white text-sm font-semibold"
@@ -1172,7 +1241,7 @@ export default function WorkOrders() {
                     <button
                       type="button"
                       onClick={handleAssign}
-                      disabled={isAssigning}
+                      disabled={isAssigning || !assignUserId}
                       className="px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap"
                     >
                       {isAssigning ? 'Kaydediliyor...' : 'Atamayı Kaydet'}
@@ -1290,6 +1359,42 @@ export default function WorkOrders() {
                 )}
               </div>
             </div>
+            {isOfficeCloseOpen && !isEditingDetail && selectedOrder && !isTerminalWorkOrderStatus(selectedOrder.status) && (
+              <div className="px-6 py-4 border-t border-amber-200 bg-amber-50">
+                <h3 className="text-sm font-bold text-amber-900 mb-2">İş Emri Kapat — Tamamlandı</h3>
+                <p className="text-xs text-amber-800 mb-3">
+                  Yanlış alarm dahil tüm durumlarda iş emri Tamamlandı olarak kapatılır. Saha notu zorunludur.
+                </p>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Saha Notu *</label>
+                <textarea
+                  value={officeCloseNote}
+                  onChange={(e) => setOfficeCloseNote(e.target.value)}
+                  rows={3}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                  placeholder="Kapanış açıklaması (ör. yanlış alarm, müdahale özeti…)"
+                />
+                <div className="flex justify-end gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOfficeCloseOpen(false);
+                      setOfficeCloseNote('');
+                    }}
+                    className="border border-slate-300 text-slate-600 font-bold px-4 py-2 rounded-xl hover:bg-white transition text-sm"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOfficeClose}
+                    disabled={isOfficeClosing || !officeCloseNote.trim()}
+                    className="bg-emerald-600 text-white font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 shadow transition disabled:opacity-60 text-sm"
+                  >
+                    {isOfficeClosing ? 'Kapatılıyor…' : 'Tamamlandı Olarak Kapat'}
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
               {isEditingDetail ? (
                 <>
@@ -1311,6 +1416,15 @@ export default function WorkOrders() {
                 </>
               ) : (
                 <>
+                  {canOfficeClose && selectedOrder && !isTerminalWorkOrderStatus(selectedOrder.status) && (
+                    <button
+                      type="button"
+                      onClick={() => setIsOfficeCloseOpen((v) => !v)}
+                      className="bg-emerald-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-emerald-700 shadow transition mr-auto"
+                    >
+                      ✅ İş Emri Kapat
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setIsEditingDetail(true)}

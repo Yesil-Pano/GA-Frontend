@@ -150,3 +150,10 @@ export function isSuperAdmin(profile?: AuthProfile | null): boolean {
 export function isTenantAdmin(profile?: AuthProfile | null): boolean {
   return hasRole('TenantAdmin', profile);
 }
+
+/** Saha personeli dışındaki ofis kullanıcıları — ofisten iş emri kapatma */
+export function canCloseWorkOrderFromOffice(profile?: AuthProfile | null): boolean {
+  if (isSuperAdmin(profile)) return true;
+  const officeRoles = ['TenantAdmin', 'OfficeUser', 'OperationReporter', 'IsgInspector'];
+  return officeRoles.some((r) => hasRole(r, profile));
+}

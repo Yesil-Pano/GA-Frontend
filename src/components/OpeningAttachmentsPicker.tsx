@@ -5,6 +5,7 @@ import {
   revokePendingPreviews,
   validateOpeningFile,
   isVideoContentType,
+  normalizeImageContentType,
 } from '../utils/openingAttachments';
 
 type Props = {
@@ -31,7 +32,7 @@ export default function OpeningAttachmentsPicker({ attachments, onChange, disabl
         alert(error);
         continue;
       }
-      const contentType = file.type || 'application/octet-stream';
+      const contentType = normalizeImageContentType(file.type, file.name);
       next.push({
         id: crypto.randomUUID(),
         file,

@@ -13,6 +13,7 @@ import type { PendingOpeningAttachment } from '../utils/openingAttachments';
 import {
   revokePendingPreviews,
   uploadOpeningAttachments,
+  formatOpeningUploadError,
 } from '../utils/openingAttachments';
 
 interface StationData {
@@ -493,7 +494,7 @@ export default function MapPage() {
           await uploadOpeningAttachments(workOrderId, attachmentsToUpload);
         } catch (uploadError) {
           console.error(uploadError);
-          alert('İş emri oluşturuldu ancak açılış ekleri yüklenemedi.');
+          alert(`İş emri oluşturuldu ancak ${formatOpeningUploadError(uploadError)}`);
         }
       }
       revokePendingPreviews(openingAttachments);
@@ -716,6 +717,15 @@ export default function MapPage() {
                         <option value="">Atanmamış (sonra ata)</option>
                         {personnel.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
                       </select>
+                      {bulkForm.assignedToUserId ? (
+                        <p className="text-[11px] text-emerald-700 font-medium mt-1.5">
+                          Seçilen saha personeline otomatik atanır; iş emri Bekliyor durumunda açılır.
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-slate-600 font-medium mt-1.5">
+                          Boş bırakılırsa iş emri Atanmamış açılır; atamayı sonra detay kartından yapabilirsiniz.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
