@@ -27,6 +27,7 @@ import {
   saveAuthProfileFromMeResponse,
   type AuthProfile,
 } from '../utils/authSession';
+import { logoutSession } from '../utils/sessionTokens';
 import ModalOverlay from '../components/ModalOverlay';
 
 const Logo = ({ isExpanded }: { isExpanded: boolean }) => (
@@ -310,7 +311,8 @@ export default function MainLayout() {
     authorizedNavItems.push({ path: '/admin-panel', label: 'Sistem Yönetimi', icon: '🛠️' });
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession();
     clearAuthSession();
     navigate('/login', { replace: true });
   };

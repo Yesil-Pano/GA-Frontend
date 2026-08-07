@@ -1,5 +1,4 @@
 // ga-frontend/src/App.tsx
-import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import MainLayout from './layouts/MainLayout';
@@ -14,20 +13,16 @@ import Planning from './pages/Planning';
 import Reports from './pages/Reports';
 import AdminPanel from './pages/AdminPanel';
 import Chat from './pages/Chat';
-
-const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
-  const token = localStorage.getItem('token');
-  return token ? <>{children}</> : <Navigate to="/login" />;
-};
+import SessionGate from './components/SessionGate';
 
 function App() {
   return (
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<PrivateRoute><MainLayout /></PrivateRoute>}>
+        <Route path="/" element={<SessionGate><MainLayout /></SessionGate>}>
           <Route index element={<Dashboard />} />
-          <Route path="dashboard" element={<Navigate to="/" replace />} /> 
+          <Route path="dashboard" element={<Navigate to="/" replace />} />
           <Route path="work-orders" element={<WorkOrders />} />
           <Route path="map" element={<MapPage />} />
           <Route path="users" element={<Users />} />

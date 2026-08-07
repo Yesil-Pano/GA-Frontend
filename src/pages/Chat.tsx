@@ -12,6 +12,7 @@ import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { getAuthProfile } from '../utils/authSession';
 import { registerWebPushIfNeeded } from '../utils/webPush';
+import PageLoading from '../components/PageLoading';
 
 interface DirectContact {
   conversationId: string | null;
@@ -213,7 +214,8 @@ const Chat: React.FC = () => {
 
     const connect = async () => {
       try {
-        const token = localStorage.getItem('token');
+        const { getAccessToken } = await import('../utils/sessionTokens');
+        const token = getAccessToken();
         const connection = new HubConnectionBuilder()
           .withUrl(getHubBaseUrl(), { accessTokenFactory: () => token || '' })
           .withAutomaticReconnect()
@@ -387,7 +389,7 @@ const Chat: React.FC = () => {
             </button>
           )}
           {loadingList ? (
-            <p className="p-4 text-sm text-slate-500">Yükleniyor...</p>
+            <PageLoading variant="panel" className="min-h-[280px]" />
           ) : filtered.length === 0 ? (
             <p className="p-4 text-sm text-slate-500">Mesajlaşabileceğiniz kişi bulunamadı.</p>
           ) : (

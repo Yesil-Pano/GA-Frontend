@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
+import PageLoading from '../components/PageLoading';
 
 interface TenantLookup {
   id: string;
@@ -32,6 +33,7 @@ const DEMO_DURATIONS = [
 
 export default function AdminPanel() {
   const [tenants, setTenants] = useState<TenantLookup[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'tenant' | 'project'>('tenant');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -47,11 +49,14 @@ export default function AdminPanel() {
   useEffect(() => {
     let isMounted = true;
     const loadTenantsData = async () => {
+      setIsLoading(true);
       try {
         const res = await api.get('/superadmin/tenants');
         if (isMounted) setTenants(res.data);
       } catch (err) {
         console.error('Firmalar yüklenemedi', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     };
     loadTenantsData();
@@ -127,6 +132,10 @@ export default function AdminPanel() {
       showMsg('error', errMsg(err));
     }
   };
+
+  if (isLoading) {
+    return <PageLoading className="absolute inset-0 z-20 min-h-0 h-full" />;
+  }
 
   return (    <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
       <div className="border-b border-slate-200 pb-4 mb-6">

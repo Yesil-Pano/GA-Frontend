@@ -9,7 +9,19 @@ import { durationMinutes, formatTurkeyDateTime, toTurkeyDateTimeLocal } from '..
 import { isSuperAdmin, canCloseWorkOrderFromOffice, saveAuthProfileFromMeResponse } from '../utils/authSession';
 import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
-import { isVideoContentType, OPENING_ATTACHMENT_CATEGORY } from '../utils/openingAttachments';
+import PageLoading from '../components/PageLoading';
+import WorkOrderPhotoPicker from '../components/WorkOrderPhotoPicker';
+import { sortWorkOrdersNewestFirst } from '../utils/workOrderSort';
+import {
+  formatOpeningUploadError,
+  isVideoContentType,
+  MAX_OPENING_ATTACHMENTS,
+  OPENING_ATTACHMENT_CATEGORY,
+  revokePendingPreviews,
+  uploadOpeningAttachments,
+  uploadWorkOrderPhotos,
+  type PendingOpeningAttachment,
+} from '../utils/openingAttachments';
 
 interface WorkOrderData {
   id: string;
@@ -73,7 +85,16 @@ const WORK_ORDER_STATUS_BADGES: {
   { key: 'İptal', label: 'İptal', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
 ];
 
+const TERMINAL_WORK_ORDER_STATUSES = new Set(['Tamamlandı', 'İptal', 'İptal Edildi']);
+
 function matchesWorkOrderStatusFilter(order: WorkOrderData, statusKey: WorkOrderStatusFilterKey): boolean {
+  if (statusKey === 'Tamamlanan') return order.status === 'Tamamlandı';
+  if (statusKey === 'İptal') return order.status === 'İptal Edildi' || order.status === 'İptal';
+
+  if (TERMINAL_WORK_ORDER_STATUSES.has(order.status)) {
+    return false;
+  }
+
   if (statusKey === 'Atanmamış') {
     return order.status === 'Atanmamış'
       || !order.assignedToUserId
@@ -81,8 +102,6 @@ function matchesWorkOrderStatusFilter(order: WorkOrderData, statusKey: WorkOrder
       || order.assignedToUserName === ''
       || order.assignedToUserName === 'Atanmamış';
   }
-  if (statusKey === 'Tamamlanan') return order.status === 'Tamamlandı';
-  if (statusKey === 'İptal') return order.status === 'İptal Edildi' || order.status === 'İptal';
   return order.status === statusKey;
 }
 
@@ -176,6 +195,9 @@ export default function WorkOrders() {
   /** TESLA: varsayılan EN; bayraklarla TR/EN */
   const [displayLang, setDisplayLang] = useState<'en' | 'tr'>('en');
   const [isTranslating, setIsTranslating] = useState(false);
+  const [pendingOpeningAttachments, setPendingOpeningAttachments] = useState<PendingOpeningAttachment[]>([]);
+  const [pendingIsgAttachments, setPendingIsgAttachments] = useState<PendingOpeningAttachment[]>([]);
+  const [pendingOperasyonAttachments, setPendingOperasyonAttachments] = useState<PendingOpeningAttachment[]>([]);
   const [editFormData, setEditFormData] = useState({
     title: '',
     customerName: '',
@@ -197,6 +219,7 @@ export default function WorkOrders() {
     startedAt: '',
     completedAt: '',
     cancelledAt: '',
+    fieldNote: '',
   });
 
   const { setFocusedMarkerPosition, refreshMapData, partnerKey } = useOutletContext<{
@@ -225,8 +248,10 @@ export default function WorkOrders() {
   }, [searchMatchedOrders]);
 
   const filteredOrders = useMemo(() => {
-    if (!filter) return searchMatchedOrders;
-    return searchMatchedOrders.filter((order) => matchesWorkOrderStatusFilter(order, filter));
+    const base = !filter
+      ? searchMatchedOrders
+      : searchMatchedOrders.filter((order) => matchesWorkOrderStatusFilter(order, filter));
+    return sortWorkOrdersNewestFirst(base);
   }, [searchMatchedOrders, filter]);
 
   const handleSelectAll = () => {
@@ -245,6 +270,21 @@ export default function WorkOrders() {
   const revokePhotoUrls = () => {
     photoUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     photoUrlsRef.current = [];
+  };
+
+  const clearPendingAttachments = () => {
+    setPendingOpeningAttachments((prev) => {
+      revokePendingPreviews(prev);
+      return [];
+    });
+    setPendingIsgAttachments((prev) => {
+      revokePendingPreviews(prev);
+      return [];
+    });
+    setPendingOperasyonAttachments((prev) => {
+      revokePendingPreviews(prev);
+      return [];
+    });
   };
 
   const loadOrderPhotos = useCallback(async (workOrderId: string) => {
@@ -328,6 +368,7 @@ export default function WorkOrders() {
     setSelectedOrder(order);
     setAssignUserId(order.assignedToUserId || '');
     setIsEditingDetail(false);
+    clearPendingAttachments();
     setEditFormData({
       title: order.title || '',
       customerName: order.customerName || '',
@@ -351,6 +392,7 @@ export default function WorkOrders() {
       startedAt: order.startedAt ? toTurkeyDateTimeLocal(order.startedAt) : '',
       completedAt: order.completedAt ? toTurkeyDateTimeLocal(order.completedAt) : '',
       cancelledAt: order.cancelledAt ? toTurkeyDateTimeLocal(order.cancelledAt) : '',
+      fieldNote: order.fieldNote?.trim() || '',
     });
     setIsDetailModalOpen(true);
     void loadOrderPhotos(order.id);
@@ -363,6 +405,7 @@ export default function WorkOrders() {
 
   const closeDetailModal = () => {
     revokePhotoUrls();
+    clearPendingAttachments();
     setOrderPhotos([]);
     setIsDetailModalOpen(false);
     setSelectedOrder(null);
@@ -437,6 +480,7 @@ export default function WorkOrders() {
         assignedToUserId: editFormData.assignedToUserId || null,
         isPeriodic: editFormData.isPeriodic,
         recurrenceInterval: editFormData.isPeriodic ? editFormData.recurrenceInterval : 'None',
+        fieldNote: editFormData.fieldNote,
       };
       if (isSuperAdminUser) {
         if (editFormData.startedAt) payload.startedAt = new Date(editFormData.startedAt).toISOString();
@@ -444,6 +488,20 @@ export default function WorkOrders() {
         if (editFormData.cancelledAt) payload.cancelledAt = new Date(editFormData.cancelledAt).toISOString();
       }
       const { data } = await api.put(`/workorders/${selectedOrder.id}`, payload);
+
+      const attachmentsToUpload = [
+        { items: pendingOpeningAttachments, category: OPENING_ATTACHMENT_CATEGORY },
+        { items: pendingIsgAttachments, category: 'ISG' },
+        { items: pendingOperasyonAttachments, category: 'OPERASYON' },
+      ].filter((batch) => batch.items.length > 0);
+
+      for (const batch of attachmentsToUpload) {
+        if (batch.category === OPENING_ATTACHMENT_CATEGORY) {
+          await uploadOpeningAttachments(selectedOrder.id, batch.items);
+        } else {
+          await uploadWorkOrderPhotos(selectedOrder.id, batch.items, batch.category);
+        }
+      }
 
       const updated: WorkOrderData = {
         ...selectedOrder,
@@ -474,6 +532,8 @@ export default function WorkOrders() {
         descriptionEn: null,
         mobileDescriptionEn: null,
         fieldNoteEn: null,
+        fieldNote: data.fieldNote ?? editFormData.fieldNote,
+        fieldNoteAddedAt: data.fieldNoteAddedAt ?? selectedOrder.fieldNoteAddedAt,
         translationProvider: null,
         translatedAt: null,
       };
@@ -482,6 +542,10 @@ export default function WorkOrders() {
       setAssignUserId(updated.assignedToUserId || '');
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
       setIsEditingDetail(false);
+      clearPendingAttachments();
+      if (attachmentsToUpload.length > 0) {
+        await loadOrderPhotos(selectedOrder.id);
+      }
       await refreshMapData();
       if (updated.position) {
         setFocusedMarkerPosition([...updated.position]);
@@ -493,7 +557,10 @@ export default function WorkOrders() {
       }
     } catch (error) {
       console.error('Güncelleme başarısız:', error);
-      alert('İş emri kaydedilemedi.');
+      const msg = axios.isAxiosError(error) && typeof error.response?.data?.message === 'string'
+        ? error.response.data.message
+        : formatOpeningUploadError(error);
+      alert(msg);
     } finally {
       setIsSavingDetail(false);
     }
@@ -644,6 +711,7 @@ export default function WorkOrders() {
   };
 
   const openingPhotos = orderPhotos.filter((p) => p.category === 'ACILIS');
+  const remainingOpeningSlots = Math.max(0, MAX_OPENING_ATTACHMENTS - openingPhotos.length);
 
   const visiblePhotoCategories = (['ISG', 'OPERASYON', 'DIGER'] as const).filter((category) => {
     if (category === 'ISG') return canViewIsgPhotos;
@@ -669,6 +737,38 @@ export default function WorkOrders() {
       console.error(error);
       alert('Fotoğraf silinemedi.');
     }
+  };
+
+  const cancelEditDetail = () => {
+    if (selectedOrder) {
+      setEditFormData({
+        title: selectedOrder.title || '',
+        customerName: selectedOrder.customerName || '',
+        priority: selectedOrder.priority || 'Orta',
+        type: selectedOrder.type || 'Arıza',
+        category: selectedOrder.category || 'Arıza Bildirimi',
+        startDate: toTurkeyDateTimeLocal(selectedOrder.startDate),
+        endDate: toTurkeyDateTimeLocal(selectedOrder.endDate),
+        lat: selectedOrder.position?.[0] ?? 0,
+        lng: selectedOrder.position?.[1] ?? 0,
+        description: selectedOrder.description || '',
+        mobileDescription: selectedOrder.mobileDescription || '',
+        address: selectedOrder.address || '',
+        operationUserId: selectedOrder.operationUserId || '',
+        openedByUserId: selectedOrder.openedByUserId || '',
+        assignedToUserId: selectedOrder.assignedToUserId || '',
+        isPeriodic: !!selectedOrder.isPeriodic,
+        recurrenceInterval: selectedOrder.recurrenceInterval && selectedOrder.recurrenceInterval !== 'None'
+          ? selectedOrder.recurrenceInterval
+          : 'Haftalik',
+        startedAt: selectedOrder.startedAt ? toTurkeyDateTimeLocal(selectedOrder.startedAt) : '',
+        completedAt: selectedOrder.completedAt ? toTurkeyDateTimeLocal(selectedOrder.completedAt) : '',
+        cancelledAt: selectedOrder.cancelledAt ? toTurkeyDateTimeLocal(selectedOrder.cancelledAt) : '',
+        fieldNote: selectedOrder.fieldNote?.trim() || '',
+      });
+    }
+    clearPendingAttachments();
+    setIsEditingDetail(false);
   };
 
   useEffect(() => () => revokePhotoUrls(), []);
@@ -723,7 +823,7 @@ export default function WorkOrders() {
         ]);
         
         if (isMounted) {
-          setOrders(ordersRes.data);
+          setOrders(sortWorkOrdersNewestFirst(ordersRes.data));
           
           const backendData = lookupsRes.data || {};
           const mappedPersonnel = backendData.teams
@@ -904,10 +1004,7 @@ export default function WorkOrders() {
       
       <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2 pb-4 custom-scrollbar">
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center pt-20 space-y-3">
-            <svg className="animate-spin h-8 w-7 text-brand-orange" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <span className="text-xs font-bold text-slate-400 tracking-wide animate-pulse">İş Emirleri Yükleniyor...</span>
-          </div>
+          <PageLoading variant="panel" />
         ) : filteredOrders.length === 0 ? (
           <p className='text-sm text-slate-500 text-center mt-10'>Aranan kriterde iş emri bulunamadı.</p>
         ) : (
@@ -1297,16 +1394,29 @@ export default function WorkOrders() {
               <div className="col-span-2 mt-2">
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Saha Notu (Tamamlama / İptal)</label>
                 <textarea
-                  disabled
+                  disabled={!isEditingDetail}
                   rows={3}
-                  className="w-full bg-amber-50/50 border border-amber-100 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed resize-none whitespace-pre-wrap"
+                  className={`w-full font-medium rounded-lg p-2.5 resize-none whitespace-pre-wrap outline-none ${
+                    isEditingDetail
+                      ? 'bg-white border border-blue-400 focus:ring-2 focus:ring-blue-100 text-slate-700'
+                      : 'bg-amber-50/50 border border-amber-100 text-slate-700 cursor-not-allowed'
+                  }`}
                   value={
-                    (displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.fieldNoteEn?.trim())
-                      ? selectedOrder.fieldNoteEn
-                      : (selectedOrder.fieldNote?.trim() || 'Saha notu girilmemiş.')
+                    isEditingDetail
+                      ? editFormData.fieldNote
+                      : (
+                        (displayLang === 'en' && isTeslaOrder(selectedOrder) && selectedOrder.fieldNoteEn?.trim())
+                          ? selectedOrder.fieldNoteEn
+                          : (selectedOrder.fieldNote?.trim() || '')
+                      )
                   }
+                  placeholder={isEditingDetail ? 'Saha notu giriniz...' : undefined}
+                  onChange={(e) => setEditFormData({ ...editFormData, fieldNote: e.target.value })}
                 />
-                {selectedOrder.fieldNoteAddedAt && (
+                {!isEditingDetail && !selectedOrder.fieldNote?.trim() && (
+                  <p className="text-xs text-slate-400 italic mt-1">Saha notu girilmemiş.</p>
+                )}
+                {(isEditingDetail ? editFormData.fieldNote && selectedOrder.fieldNoteAddedAt : selectedOrder.fieldNoteAddedAt) && (
                   <p className="text-[10px] text-slate-400 mt-1 font-semibold">Eklenme: {selectedOrder.fieldNoteAddedAt}</p>
                 )}
               </div>
@@ -1318,9 +1428,11 @@ export default function WorkOrders() {
                 {loadingPhotos ? (
                   <p className="text-xs text-slate-400 italic">Yükleniyor...</p>
                 ) : openingPhotos.length === 0 ? (
+                  !isEditingDetail ? (
                   <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-3">
                     Açılış eki yok.
                   </p>
+                  ) : null
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {openingPhotos.map((photo, photoIndex) => (
@@ -1341,6 +1453,21 @@ export default function WorkOrders() {
                     ))}
                   </div>
                 )}
+                {isEditingDetail && remainingOpeningSlots > 0 && (
+                  <WorkOrderPhotoPicker
+                    title="Yeni Açılış Eki"
+                    hint="Görsel (max 10 MB) veya video (max 30 MB)"
+                    allowVideo
+                    maxCount={remainingOpeningSlots}
+                    attachments={pendingOpeningAttachments}
+                    onChange={setPendingOpeningAttachments}
+                  />
+                )}
+                {isEditingDetail && remainingOpeningSlots === 0 && openingPhotos.length >= MAX_OPENING_ATTACHMENTS && (
+                  <p className="text-xs text-amber-700 font-semibold bg-amber-50 border border-amber-100 rounded-lg p-3">
+                    En fazla {MAX_OPENING_ATTACHMENTS} açılış eki yüklenebilir.
+                  </p>
+                )}
               </div>
 
               <div className="col-span-2 space-y-4">
@@ -1358,9 +1485,11 @@ export default function WorkOrders() {
                         {title} ({photos.length})
                       </label>
                       {photos.length === 0 ? (
+                        !isEditingDetail ? (
                         <p className="text-xs text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg p-3">
                           Bu kategoride fotoğraf yok.
                         </p>
+                        ) : null
                       ) : (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                           {photos.map((photo, photoIndex) => (
@@ -1381,6 +1510,7 @@ export default function WorkOrders() {
                                 )}
                                 <p className="text-[10px] text-slate-500 px-2 py-1 truncate font-semibold">{photo.fileName}</p>
                               </button>
+                              {!isEditingDetail && (
                               <button
                                 type="button"
                                 onClick={() => handleDeletePhoto(photo.id)}
@@ -1388,9 +1518,26 @@ export default function WorkOrders() {
                               >
                                 Sil
                               </button>
+                              )}
                             </div>
                           ))}
                         </div>
+                      )}
+                      {isEditingDetail && category === 'ISG' && (
+                        <WorkOrderPhotoPicker
+                          title="Yeni İSG Fotoğrafı"
+                          hint="JPEG, PNG veya WebP (max 10 MB)"
+                          attachments={pendingIsgAttachments}
+                          onChange={setPendingIsgAttachments}
+                        />
+                      )}
+                      {isEditingDetail && category === 'OPERASYON' && (
+                        <WorkOrderPhotoPicker
+                          title="Yeni Operasyoncu Fotoğrafı"
+                          hint="JPEG, PNG veya WebP (max 10 MB)"
+                          attachments={pendingOperasyonAttachments}
+                          onChange={setPendingOperasyonAttachments}
+                        />
                       )}
                     </div>
                   );
@@ -1408,7 +1555,7 @@ export default function WorkOrders() {
                 <>
                   <button
                     type="button"
-                    onClick={() => setIsEditingDetail(false)}
+                    onClick={cancelEditDetail}
                     className="border border-slate-300 text-slate-600 font-bold px-5 py-2 rounded-xl hover:bg-white transition"
                   >
                     Vazgeç

@@ -12,6 +12,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { clearAuthSession, isSuperAdmin } from '../utils/authSession';
+import { logoutSession } from '../utils/sessionTokens';
 
 interface MenuItem {
   name: string;
@@ -35,7 +36,8 @@ const Sidebar: React.FC = () => {
     { name: 'Zaman Çizelgesi', path: '/timesheet', icon: <Briefcase size={20} /> },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession();
     clearAuthSession();
     navigate('/login');
   };

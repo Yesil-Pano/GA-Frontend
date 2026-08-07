@@ -118,10 +118,18 @@ export async function uploadOpeningAttachments(
   workOrderId: string,
   attachments: PendingOpeningAttachment[],
 ): Promise<void> {
+  await uploadWorkOrderPhotos(workOrderId, attachments, OPENING_ATTACHMENT_CATEGORY);
+}
+
+export async function uploadWorkOrderPhotos(
+  workOrderId: string,
+  attachments: PendingOpeningAttachment[],
+  description: string,
+): Promise<void> {
   for (const item of attachments) {
     const prepared = item.isVideo ? item.file : await compressImageForUpload(item.file);
     const contentType = item.isVideo
-      ? item.contentType
+       ? item.contentType
       : normalizeImageContentType(prepared.type, prepared.name);
     const base64Data = await readFileAsBase64(prepared);
     await api.post('/photos', {
@@ -130,9 +138,20 @@ export async function uploadOpeningAttachments(
       contentType,
       entityType: 'WorkOrder',
       entityId: workOrderId,
-      description: OPENING_ATTACHMENT_CATEGORY,
+      description,
     }, { timeout: 180_000 });
   }
+}
+
+export function validateWorkOrderImageFile(file: File): string | null {
+  const type = normalizeImageContentType(file.type, file.name);
+  if (!IMAGE_TYPES.has(type)) {
+    return `"${file.name}" desteklenmiyor. JPEG, PNG veya WebP seçin.`;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return `"${file.name}" çok büyük (en fazla ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB).`;
+  }
+  return null;
 }
 
 export function revokePendingPreviews(items: PendingOpeningAttachment[]): void {

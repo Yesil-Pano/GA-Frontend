@@ -1,3 +1,5 @@
+import { getAccessToken, clearSessionTokens } from './sessionTokens';
+
 export const EMPTY_TENANT_ID = '00000000-0000-0000-0000-000000000000';
 export const AUTH_PROFILE_KEY = 'ga_auth_profile';
 
@@ -24,7 +26,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 export function parseJwtPayload(token?: string | null): Record<string, unknown> | null {
-  const t = token ?? localStorage.getItem('token');
+  const t = token ?? getAccessToken();
   if (!t) return null;
   return decodeJwtPayload(t);
 }
@@ -114,7 +116,7 @@ export function saveAuthProfileFromMeResponse(data: {
 }
 
 export function clearAuthSession(): void {
-  localStorage.removeItem('token');
+  clearSessionTokens();
   localStorage.removeItem('user');
   localStorage.removeItem('isAuthenticated');
   localStorage.removeItem(AUTH_PROFILE_KEY);

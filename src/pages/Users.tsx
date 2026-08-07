@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../services/api';
 import ModalOverlay from '../components/ModalOverlay';
+import PageLoading from '../components/PageLoading';
 
 interface UserRow {
   id: string;
@@ -311,9 +312,7 @@ export default function Users() {
   };
 
   if (isLoading) {
-    return (
-      <div className="p-6 text-slate-500 font-medium">Kullanıcılar yükleniyor...</div>
-    );
+    return <PageLoading className="absolute inset-0 z-20 min-h-0 h-full" />;
   }
 
   if (accessDenied) {

@@ -35,3 +35,19 @@ input[type="checkbox"].ga-checkbox-accent-emerald {
 input[type="checkbox"].ga-checkbox-accent-blue {
   accent-color: #2563eb;
 }
+
+.page-loading-spinner {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  border: 4px solid rgba(255, 158, 24, 0.15);
+  border-top-color: var(--color-brand-orange);
+  border-right-color: var(--color-brand-orange);
+  animation: page-loading-spin 0.85s linear infinite;
+}
+
+@keyframes page-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

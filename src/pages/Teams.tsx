@@ -4,9 +4,10 @@ import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { trIncludes } from '../utils/trSearch';
-import { getPartnerByKey, getPartnerColor, resolvePartnerKey } from '../utils/partners';
+import { getPartnerColor, resolvePartnerKey } from '../utils/partners';
 import { isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
+import PageLoading from '../components/PageLoading';
 
 interface TeamMemberData {
   id: string;
@@ -735,19 +736,12 @@ export default function Teams() {
 
       <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar pb-4">
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center pt-20 space-y-3">
-            <svg className="animate-spin h-8 w-7 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span className="text-xs font-bold text-slate-400 tracking-wide animate-pulse">Ekipler Yükleniyor...</span>
-          </div>
+          <PageLoading variant="panel" />
         ) : filteredTeams.length === 0 ? (
           <p className="text-sm text-slate-400 text-center mt-10">Kayıtlı ekip bulunmuyor.</p>
         ) : (
           filteredTeams.map((team) => {
             const pk = resolvePartnerKey({ tenantId: team.tenantId, name: team.project });
-            const partner = pk ? getPartnerByKey(pk) : null;
             const accent = partnerKey === 'all' ? getPartnerColor(pk) : '#B4D334';
             return (
             <div 
@@ -756,18 +750,11 @@ export default function Teams() {
               className="bg-white rounded-xl shadow-md border border-slate-200 border-l-[6px] p-4 cursor-pointer hover:shadow-lg transition relative group"
               style={{ borderLeftColor: accent }}
             >
-              <div className="flex justify-between items-start mb-2 gap-2">
-                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-2">
+                <label className="flex min-w-0 cursor-pointer items-start gap-3" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" className="ga-checkbox mt-0.5" />
                   <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors break-words leading-snug">{team.name}</span>
                 </label>
-                {partnerKey === 'all' && partner && partner.key !== 'all' ? (
-                  <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: partner.color }}>
-                    {partner.name}
-                  </span>
-                ) : (
-                  <span className="text-xl shrink-0">📇</span>
-                )}
               </div>
 
               <div className="space-y-1 text-xs text-slate-700 font-medium pl-7">

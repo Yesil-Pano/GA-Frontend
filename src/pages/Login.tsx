@@ -4,11 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import logoImg from '../assets/logo.png';
 import { saveAuthProfileFromLogin, saveAuthProfileFromMeResponse } from '../utils/authSession';
+import {
+  getRememberMePreference,
+  saveSessionTokens,
+} from '../utils/sessionTokens';
 
 interface AxiosErrorResponse {
   response?: {
     data?: {
       message?: string;
+      Message?: string;
     };
   };
 }
@@ -16,6 +21,7 @@ interface AxiosErrorResponse {
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => getRememberMePreference());
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -28,11 +34,15 @@ export default function Login() {
     try {
       const response = await api.post('/auth/login', {
         email: email,
-        password: password
+        password: password,
       });
 
-      // 🚀 YENİ NESİL KORUMA: JWT Token kaydediliyor
-      localStorage.setItem('token', response.data.token);
+      saveSessionTokens(
+        response.data.token,
+        response.data.refreshToken ?? null,
+        rememberMe,
+      );
+
       saveAuthProfileFromLogin({
         userId: response.data.userId,
         username: response.data.username,
@@ -46,19 +56,21 @@ export default function Login() {
       } catch {
         /* JWT + login yanıtı yeterli; profil sonraki istekte güncellenir */
       }
-      
-      // 🚀 GERİYE DÖNÜK UYUMLULUK FIX: Eski sayfaların login'e fırlatmasını engellemek için set ediyoruz!
+
       localStorage.setItem('isAuthenticated', 'true');
-      
       localStorage.setItem('user', JSON.stringify({
         username: response.data.username,
-        fullName: response.data.fullName
+        fullName: response.data.fullName,
       }));
 
       navigate('/');
     } catch (err) {
       const axiosError = err as AxiosErrorResponse;
-      setError(axiosError.response?.data?.message || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.');
+      setError(
+        axiosError.response?.data?.message
+          || axiosError.response?.data?.Message
+          || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -67,7 +79,7 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
-        
+
         <div className="flex flex-col items-center mb-8">
           <img src={logoImg} alt="Görev Adamı" className="w-24 h-24 object-contain mb-4" />
           <h1 className="text-2xl font-extrabold text-brand-navy">Sisteme Giriş Yap</h1>
@@ -86,7 +98,7 @@ export default function Login() {
             <input
               type="text"
               required
-              autoComplete="username" 
+              autoComplete="username"
               className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
               placeholder="ornek@sirket.com veya kullaniciadi"
               value={email}
@@ -98,17 +110,26 @@ export default function Login() {
             <input
               type="password"
               required
-              autoComplete="current-password" 
+              autoComplete="current-password"
               className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-orange focus:border-brand-orange outline-none transition-all text-sm"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="ga-checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
+            <span className="text-sm font-medium text-slate-600">Beni Hatırla</span>
+          </label>
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3.5 rounded-xl transition-colors shadow-md shadow-blue-200 mt-4 flex justify-center items-center"
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3.5 rounded-xl transition-colors shadow-md shadow-blue-200 mt-2 flex justify-center items-center"
           >
             {isLoading ? 'Giriş Yapılıyor...' : 'Giriş Yap'}
           </button>

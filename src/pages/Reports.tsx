@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
+import PageLoading from '../components/PageLoading';
 
 interface PersonnelOption {
   id: string;
@@ -348,7 +349,11 @@ export default function Reports() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400 font-semibold">Yükleniyor...</td></tr>
+                <tr>
+                  <td colSpan={11} className="p-0">
+                    <PageLoading variant="panel" className="min-h-[280px]" />
+                  </td>
+                </tr>
               ) : !hasSearched ? (
                 <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400 font-semibold">Henüz sorgu çalıştırılmadı.</td></tr>
               ) : rows.length === 0 ? (
