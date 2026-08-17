@@ -1,3 +1,5 @@
+// src/components/OpeningAttachmentsPicker.tsx
+
 import { useRef } from 'react';
 import type { PendingOpeningAttachment } from '../utils/openingAttachments';
 import {

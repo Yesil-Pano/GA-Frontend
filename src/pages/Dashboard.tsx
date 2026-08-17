@@ -1,4 +1,5 @@
 // ga-frontend/src/pages/Dashboard.tsx
+
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
@@ -53,7 +54,7 @@ function VerticalBarChart({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div className="flex-1 min-h-[100px] flex items-end gap-1 sm:gap-1.5 border-b border-l border-slate-200 pl-2 pb-1 overflow-x-auto overflow-y-hidden">
+      <div className="flex-1 min-h-25 flex items-end gap-1 sm:gap-1.5 border-b border-l border-slate-200 pl-2 pb-1 overflow-x-auto overflow-y-hidden">
         {!hasData ? (
           <p className="m-auto text-xs font-medium text-slate-400 px-2 text-center">{emptyMessage}</p>
         ) : (
@@ -62,14 +63,14 @@ function VerticalBarChart({
             return (
               <div
                 key={item.key}
-                className="group flex h-full min-w-[10px] max-w-[20px] flex-1 flex-col items-center justify-end"
+                className="group flex h-full min-w-2.5 max-w-5 flex-1 flex-col items-center justify-end"
                 title={item.title ?? `${item.label}: ${item.value}`}
               >
                 <span className="mb-1 hidden text-[9px] font-bold text-slate-500 group-hover:block">
                   {item.value}
                 </span>
                 <div
-                  className={`w-full max-w-[14px] rounded-t-sm transition-all ${item.color}`}
+                  className={`w-full max-w-3.5 rounded-t-sm transition-all ${item.color}`}
                   style={{ height: `${Math.max(item.value > 0 ? 8 : 3, pct)}%`, maxHeight: '100%' }}
                 />
               </div>
@@ -82,7 +83,7 @@ function VerticalBarChart({
           {items.map((item, index) => (
             <span
               key={item.key}
-              className="min-w-[10px] max-w-[20px] flex-1 truncate text-center text-[8px] font-semibold text-slate-400"
+              className="min-w-2.5 max-w-5 flex-1 truncate text-center text-[8px] font-semibold text-slate-400"
               title={item.label}
             >
               {(index % 2 === 0 || items.length <= 7) ? item.label : ''}

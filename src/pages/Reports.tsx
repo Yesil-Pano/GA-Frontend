@@ -1,4 +1,5 @@
 // src/pages/Reports.tsx
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
@@ -351,7 +352,7 @@ export default function Reports() {
               {loading ? (
                 <tr>
                   <td colSpan={11} className="p-0">
-                    <PageLoading variant="panel" className="min-h-[280px]" />
+                    <PageLoading variant="panel" className="min-h-70" />
                   </td>
                 </tr>
               ) : !hasSearched ? (

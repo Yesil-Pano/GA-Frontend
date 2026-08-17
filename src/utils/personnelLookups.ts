@@ -1,3 +1,5 @@
+// src/utils/personnelLookups.ts
+
 export type PersonnelLookupItem = { id: string; fullName: string };
 
 /** Ofis kullanıcıları + saha ekibi; aynı id tekrar etmez, isme göre sıralı. */

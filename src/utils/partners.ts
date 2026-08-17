@@ -1,3 +1,5 @@
+// src/utils/partners.ts
+
 import trugoLogo from '../assets/trugo-logo.png';
 import teslaLogo from '../assets/tesla-logo.png';
 import yesilPanoLogo from '../assets/yesil-pano-logo.png';

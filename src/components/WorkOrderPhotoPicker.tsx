@@ -1,3 +1,5 @@
+// src/components/WorkOrderPhotoPicker.tsx
+
 import { useRef } from 'react';
 import type { PendingOpeningAttachment } from '../utils/openingAttachments';
 import {

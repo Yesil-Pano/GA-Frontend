@@ -1,3 +1,5 @@
+// src/utils/authSession.ts
+
 import { getAccessToken, clearSessionTokens } from './sessionTokens';
 
 export const EMPTY_TENANT_ID = '00000000-0000-0000-0000-000000000000';
@@ -163,4 +165,14 @@ export function canCloseWorkOrderFromOffice(profile?: AuthProfile | null): boole
 /** Web haritasından nokta ekleme — saha personeli hariç ofis rolleri + Super Admin */
 export function canManageStations(profile?: AuthProfile | null): boolean {
   return canCloseWorkOrderFromOffice(profile);
+}
+
+const TRUGO_TENANT_ID = 'c92cc573-957b-4862-8ae7-ff380efd15ce';
+
+/** Süper Admin veya Trugo kiracısı — EDAŞ listesine yeni isim ekleme */
+export function canManageEdasCompanies(profile?: AuthProfile | null): boolean {
+  if (isSuperAdmin(profile)) return true;
+  const p = profile ?? getAuthProfile();
+  const tenantId = p?.tenantId?.toLowerCase();
+  return tenantId === TRUGO_TENANT_ID.toLowerCase();
 }

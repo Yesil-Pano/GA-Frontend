@@ -165,20 +165,21 @@ export default function Users() {
   );
 
   const totalPages = Math.max(1, Math.ceil(sortedUsers.length / PAGE_SIZE));
+
+  const listControlKey = `${search}|${tenantFilter}|${roleFilter}|${statusFilter}|${sortKey}|${sortDir}`;
+  const [prevListControlKey, setPrevListControlKey] = useState(listControlKey);
+
+  if (listControlKey !== prevListControlKey) {
+    setPrevListControlKey(listControlKey);
+    setCurrentPage(1);
+  }
+
   const safePage = Math.min(currentPage, totalPages);
 
   const paginatedUsers = useMemo(() => {
     const start = (safePage - 1) * PAGE_SIZE;
     return sortedUsers.slice(start, start + PAGE_SIZE);
   }, [sortedUsers, safePage]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, tenantFilter, roleFilter, statusFilter, sortKey, sortDir]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -222,7 +223,28 @@ export default function Users() {
     }
   }, []);
 
-  useEffect(() => { loadUsers(); }, [loadUsers]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [usersRes, rolesRes, tenantsRes] = await Promise.all([
+          api.get<UserRow[]>('/users'),
+          api.get<RoleRow[]>('/users/roles'),
+          api.get<TenantRow[]>('/users/tenants'),
+        ]);
+        if (cancelled) return;
+        setUsers(usersRes.data);
+        setRoles(rolesRes.data);
+        setTenants(tenantsRes.data);
+        setAccessDenied(false);
+      } catch {
+        if (!cancelled) setAccessDenied(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const openCreate = () => {
     setModalMode('create');
@@ -496,7 +518,7 @@ export default function Users() {
                   key={page}
                   type="button"
                   onClick={() => setCurrentPage(page)}
-                  className={`min-w-[2rem] px-2 py-1.5 rounded-lg text-sm font-bold transition ${
+                  className={`min-w-8 px-2 py-1.5 rounded-lg text-sm font-bold transition ${
                     page === safePage
                       ? 'bg-blue-600 text-white'
                       : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'

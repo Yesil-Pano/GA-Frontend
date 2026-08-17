@@ -1,4 +1,5 @@
 // src/pages/WorkOrders.tsx
+
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -951,7 +952,7 @@ export default function WorkOrders() {
               >
                 <span>{badge.label}</span>
                 <span
-                  className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-center ${
+                  className={`min-w-5 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-center ${
                     isActive ? 'bg-white/25 text-white' : 'bg-white/80 text-slate-700'
                   }`}
                 >
@@ -1023,7 +1024,7 @@ export default function WorkOrders() {
                     {partner.name}
                   </span>
                 )}
-                <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy break-words">
+                <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy wrap-break-word">
                   Nokta Adı: {order.customerName || order.title}
                 </h3>
                 <div className="flex flex-col gap-1.5 text-xs mb-3">
@@ -1047,7 +1048,7 @@ export default function WorkOrders() {
                   </div>
                   <div className="flex items-start gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">Genel Açıklama</span>
-                    <span className="text-slate-800 font-medium line-clamp-3 break-words">{order.description?.trim() || '—'}</span>
+                    <span className="text-slate-800 font-medium line-clamp-3 wrap-break-word">{order.description?.trim() || '—'}</span>
                   </div>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-slate-100">

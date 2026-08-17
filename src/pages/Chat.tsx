@@ -1,3 +1,5 @@
+// src/pages/Chat.tsx
+
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HubConnection,
@@ -115,6 +117,12 @@ const Chat: React.FC = () => {
   const selectedConversationIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const myUserIdRef = useRef<string | null>(getAuthProfile()?.userId ?? null);
+  const [prevPartnerKey, setPrevPartnerKey] = useState(partnerKey);
+
+  if (partnerKey !== prevPartnerKey) {
+    setPrevPartnerKey(partnerKey);
+    setLoadingList(true);
+  }
 
   useEffect(() => {
     myUserIdRef.current = getAuthProfile()?.userId ?? null;
@@ -141,6 +149,11 @@ const Chat: React.FC = () => {
       setLoadingList(false);
     }
   }, [partnerKey]);
+
+  const loadContactsRef = useRef(loadContacts);
+  useEffect(() => {
+    loadContactsRef.current = loadContacts;
+  }, [loadContacts]);
 
   const loadMessages = useCallback(async (conversationId: string, silent = false) => {
     if (!silent) setLoadingMessages(true);
@@ -204,10 +217,27 @@ const Chat: React.FC = () => {
   );
 
   useEffect(() => {
-    setLoadingList(true);
-    void loadContacts();
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get<DirectContact[]>('/office-chat/contacts', {
+          params: { partnerKey: partnerKey || undefined },
+        });
+        if (cancelled) return;
+        setContacts(data);
+        setError(null);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setError(getApiErrorMessage(err, 'Kişi listesi yüklenemedi.'));
+      } finally {
+        if (!cancelled) setLoadingList(false);
+      }
+    })();
     void registerWebPushIfNeeded();
-  }, [loadContacts]);
+    return () => {
+      cancelled = true;
+    };
+  }, [partnerKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,11 +263,11 @@ const Chat: React.FC = () => {
               .catch(() => undefined);
             setTimeout(scrollToBottom, 50);
           }
-          void loadContacts();
+          void loadContactsRef.current();
         });
 
         connection.on('DirectConversationUpdated', () => {
-          void loadContacts();
+          void loadContactsRef.current();
         });
 
         connection.on('DirectMessagesRead', (payload: { conversationId: string; userId: string }) => {
@@ -288,7 +318,7 @@ const Chat: React.FC = () => {
       connectionRef.current?.stop().catch(() => undefined);
       connectionRef.current = null;
     };
-  }, [loadContacts]);
+  }, []);
 
   useEffect(() => {
     if (!selectedConversationId || liveStatus === 'live') return;
@@ -382,14 +412,17 @@ const Chat: React.FC = () => {
           {error && !selectedConversationId && (
             <button
               type="button"
-              onClick={() => void loadContacts()}
+              onClick={() => {
+                setLoadingList(true);
+                void loadContacts();
+              }}
               className="m-3 w-[calc(100%-1.5rem)] rounded-lg bg-orange-50 px-3 py-2 text-left text-xs font-medium text-[#F97316]"
             >
               {error} — Yenile
             </button>
           )}
           {loadingList ? (
-            <PageLoading variant="panel" className="min-h-[280px]" />
+            <PageLoading variant="panel" className="min-h-70" />
           ) : filtered.length === 0 ? (
             <p className="p-4 text-sm text-slate-500">Mesajlaşabileceğiniz kişi bulunamadı.</p>
           ) : (

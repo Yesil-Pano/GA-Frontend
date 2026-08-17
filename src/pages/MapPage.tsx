@@ -1,4 +1,5 @@
 // src/pages/MapPage.tsx
+
 import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
@@ -11,6 +12,7 @@ import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
 import PageLoading from '../components/PageLoading';
 import OpeningAttachmentsPicker from '../components/OpeningAttachmentsPicker';
+import EdasSelectField from '../components/EdasSelectField';
 import type { PendingOpeningAttachment } from '../utils/openingAttachments';
 import {
   revokePendingPreviews,
@@ -54,7 +56,6 @@ interface MapPageOutletContext {
   isMapStationsLoading?: boolean;
 }
 
-const EDAS_LIST = ["VANGÖLÜ", "ULUDAĞ", "TIRAKYA", "TOROSLAR", "SAKARYA", "OSMANGAZİ", "MERAM", "KCTAŞ", "GDZ", "FIRAT", "DİCLE", "ÇORUH", "ÇAMLIBEL", "BOĞAZİÇİ", "BAŞKENT", "AYEDAŞ", "AKEDAŞ", "AKDENİZ", "ADM", "ARAS"];
 const CITIES = ["Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın","Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri","Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin","Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray","Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova","Karabük","Kilis","Osmaniye","Düzce"];
 
 type StationStatusFilter = 'Tümü' | 'Bakıma Dahil' | 'Bakım Dışı';
@@ -151,7 +152,7 @@ const StationListCard = memo(function StationListCard({
             {partner.name}
           </span>
         )}
-        <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy break-words group-hover:text-brand-orange transition-colors">
+        <h3 className="mb-2 text-base font-bold leading-snug text-brand-navy wrap-break-word group-hover:text-brand-orange transition-colors">
           📍 {station.name}
         </h3>
         <div className="space-y-1 text-xs text-slate-600 font-medium">
@@ -194,6 +195,7 @@ export default function MapPage() {
   const [selectedStation, setSelectedStation] = useState<StationData | null>(null);
   const [isEditingDetail, setIsEditingDetail] = useState(false);
   const [isSavingDetail, setIsSavingDetail] = useState(false);
+  const [isDeletingStation, setIsDeletingStation] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
     city: 'Ankara',
@@ -215,6 +217,8 @@ export default function MapPage() {
 
   const canAddStation =
     canManageStations() && (!isSuperAdminUser || (partnerKey && partnerKey !== 'all'));
+
+  const canDeleteStation = canManageStations();
 
   const activePartnerForStation =
     partnerKey && partnerKey !== 'all' ? getPartnerByKey(partnerKey as PartnerKey) : null;
@@ -301,6 +305,27 @@ export default function MapPage() {
     }
   };
 
+  const handleDeleteStation = async () => {
+    if (!selectedStation) return;
+    const confirmed = window.confirm(
+      `"${selectedStation.name}" noktasını silmek istediğinize emin misiniz?\n\nKayıt haritadan kaldırılır (soft delete).`,
+    );
+    if (!confirmed) return;
+
+    setIsDeletingStation(true);
+    try {
+      await api.delete(`/stations/${selectedStation.id}`);
+      setSelectedIds((prev) => prev.filter((id) => id !== selectedStation.id));
+      closeStationDetail();
+      await refreshMapData?.();
+    } catch (error) {
+      console.error(error);
+      alert('Nokta silinemedi. Yetkinizi veya bağlantınızı kontrol edin.');
+    } finally {
+      setIsDeletingStation(false);
+    }
+  };
+
   const [formData, setFormData] = useState(emptyStationForm());
 
   const [bulkForm, setBulkForm] = useState({
@@ -328,12 +353,20 @@ export default function MapPage() {
     [isSuperAdminUser, officeUsers, personnel],
   );
 
-  // Partner değişince lookups yeniden alınsın (toplu iş emri personeli güncel kalsın)
-  useEffect(() => {
+  const [prevPartnerKey, setPrevPartnerKey] = useState(partnerKey);
+
+  if (partnerKey !== prevPartnerKey) {
+    setPrevPartnerKey(partnerKey);
     setLookupsLoaded(false);
     setPersonnel([]);
     setOfficeUsers([]);
-  }, [partnerKey]);
+    if (isBulkOpen) setLookupsLoading(true);
+  }
+
+  const openBulkModal = useCallback(() => {
+    if (!lookupsLoaded) setLookupsLoading(true);
+    setIsBulkOpen(true);
+  }, [lookupsLoaded]);
 
   const closeBulkModal = useCallback(() => {
     setIsBulkOpen(false);
@@ -341,21 +374,23 @@ export default function MapPage() {
     setOpeningAttachments([]);
   }, [openingAttachments]);
 
-  useEffect(() => {
-    if (selectedIds.length !== 1) {
-      setOpeningAttachments((prev) => {
-        if (prev.length === 0) return prev;
-        revokePendingPreviews(prev);
-        return [];
-      });
-    }
-  }, [selectedIds.length]);
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (next.length !== 1) {
+        setOpeningAttachments((att) => {
+          if (att.length === 0) return att;
+          revokePendingPreviews(att);
+          return [];
+        });
+      }
+      return next;
+    });
+  }, []);
 
-  // Partner değişince lookups yeniden alınsın (toplu iş emri personeli güncel kalsın)
   useEffect(() => {
     if (!isBulkOpen || lookupsLoaded) return;
     let cancelled = false;
-    setLookupsLoading(true);
     (async () => {
       try {
         const { data: backendData } = await api.get('/workorders/lookups', {
@@ -400,7 +435,7 @@ export default function MapPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isBulkOpen, lookupsLoaded, partnerKey]);
+  }, [isBulkOpen, lookupsLoaded, partnerKey, isSuperAdminUser]);
 
   const filteredStations = useMemo(
     () =>
@@ -425,10 +460,6 @@ export default function MapPage() {
   const allFilteredSelected =
     filteredStations.length > 0 && filteredStations.every((s) => selectedIdSet.has(s.id));
 
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }, []);
-
   const handleFocusStation = useCallback((position: [number, number]) => {
     setFocusedMarkerPosition(position);
   }, [setFocusedMarkerPosition]);
@@ -436,10 +467,30 @@ export default function MapPage() {
   const toggleSelectAllFiltered = () => {
     if (allFilteredSelected) {
       const filteredSet = new Set(filteredStations.map((s) => s.id));
-      setSelectedIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+      setSelectedIds((prev) => {
+        const next = prev.filter((id) => !filteredSet.has(id));
+        if (next.length !== 1) {
+          setOpeningAttachments((att) => {
+            if (att.length === 0) return att;
+            revokePendingPreviews(att);
+            return [];
+          });
+        }
+        return next;
+      });
     } else {
       const ids = filteredStations.map((s) => s.id);
-      setSelectedIds((prev) => Array.from(new Set([...prev, ...ids])));
+      setSelectedIds((prev) => {
+        const next = Array.from(new Set([...prev, ...ids]));
+        if (next.length !== 1) {
+          setOpeningAttachments((att) => {
+            if (att.length === 0) return att;
+            revokePendingPreviews(att);
+            return [];
+          });
+        }
+        return next;
+      });
     }
   };
 
@@ -594,7 +645,7 @@ export default function MapPage() {
                   startDate: start,
                   endDate: endDateForWorkType(p.type, start),
                 }));
-                setIsBulkOpen(true);
+                openBulkModal();
               }}
               className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-40"
             >
@@ -656,7 +707,7 @@ export default function MapPage() {
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Güç Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.powerType} onChange={e => setFormData({...formData, powerType: e.target.value})}><option value="">Seçiniz</option><option value="ACDC">ACDC</option><option value="AC">AC</option><option value="DC">DC</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">İlgili Personel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelName} onChange={e => setFormData({...formData, personnelName: e.target.value})} /></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Personel Tel</label><input required className="w-full border rounded-lg p-2.5" value={formData.personnelPhone} onChange={e => setFormData({...formData, personnelPhone: e.target.value})} /></div>
-                <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.edas} onChange={e => setFormData({...formData, edas: e.target.value})}><option value="">Seçiniz</option>{EDAS_LIST.map((e, i) => <option key={i} value={e}>{e}</option>)}</select></div>
+                <div><label className="block text-xs font-bold text-slate-700 mb-1">EDAŞ</label><EdasSelectField required value={formData.edas} onChange={(edas) => setFormData({ ...formData, edas })} /></div>
                 <div><label className="block text-xs font-bold text-slate-700 mb-1">Nokta Tipi</label><select required className="w-full border rounded-lg p-2.5 bg-slate-50" value={formData.pointType} onChange={e => setFormData({...formData, pointType: e.target.value})}><option value="">Seçiniz</option><option value="YG Abonelik">YG Abonelik</option><option value="AG Abonelik">AG Abonelik</option><option value="Süzme Sayaç">Süzme Sayaç</option></select></div>
                 <div><label className="block text-xs font-bold text-slate-600 mb-1">Lat</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lat} onChange={e => setFormData({...formData, lat: parseFloat(e.target.value)})} /></div>
                 <div><label className="block text-xs font-bold text-slate-600 mb-1">Lng</label><input type="number" step="any" required className="w-full border rounded-lg p-2" value={formData.lng} onChange={e => setFormData({...formData, lng: parseFloat(e.target.value)})} /></div>
@@ -872,10 +923,12 @@ export default function MapPage() {
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">EDAŞ</label>
                 {isEditingDetail ? (
-                  <select className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold" value={editForm.edas} onChange={(e) => setEditForm({ ...editForm, edas: e.target.value })}>
-                    <option value="-">-</option>
-                    {EDAS_LIST.map((e) => <option key={e} value={e}>{e}</option>)}
-                  </select>
+                  <EdasSelectField
+                    emptyOption="dash"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-semibold"
+                    value={editForm.edas}
+                    onChange={(edas) => setEditForm({ ...editForm, edas })}
+                  />
                 ) : (
                   <input disabled className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-700" value={selectedStation.edas || '—'} />
                 )}
@@ -959,7 +1012,7 @@ export default function MapPage() {
                     };
                   });
                   closeStationDetail();
-                  setIsBulkOpen(true);
+                  openBulkModal();
                 }}
               >
                 + İş Emri Aç
@@ -1002,6 +1055,16 @@ export default function MapPage() {
                   </>
                 ) : (
                   <>
+                    {canDeleteStation && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteStation}
+                        disabled={isDeletingStation}
+                        className="bg-white border border-rose-300 text-rose-700 font-bold px-4 py-2 rounded-xl hover:bg-rose-50 disabled:opacity-60"
+                      >
+                        {isDeletingStation ? 'Siliniyor…' : '🗑 Sil'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setIsEditingDetail(true)}

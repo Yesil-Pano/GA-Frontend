@@ -1,3 +1,4 @@
+// src/services/api.ts
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { getStoredPartnerKey } from '../utils/partners';
 import { clearAuthSession, isSuperAdmin } from '../utils/authSession';
@@ -9,7 +10,8 @@ import {
 } from '../utils/sessionTokens';
 
 const api = axios.create({
-  baseURL: 'https://204.168.249.86:8443/api',
+  // baseURL: 'https://204.168.249.86:8443/api',
+  baseURL: 'https://gorevadami.net/api',
 });
 
 type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean };

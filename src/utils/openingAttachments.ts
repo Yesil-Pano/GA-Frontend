@@ -1,3 +1,5 @@
+// src/utils/openingAttachments.ts
+
 import api from '../services/api';
 
 export const OPENING_ATTACHMENT_CATEGORY = 'ACILIS';

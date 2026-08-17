@@ -1,3 +1,5 @@
+// src/utils/trSearch.ts
+
 /** Türkçe duyarsız arama: İstanbul/istanbul, İzmir/izmir eşleşir. */
 export function trFold(value: string): string {
   return value

@@ -1,3 +1,5 @@
+// src/hooks/useSessionGate.ts
+
 import { useEffect, useState } from 'react';
 import {
   getAccessToken,

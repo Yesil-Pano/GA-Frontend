@@ -1,3 +1,5 @@
+// src/components/SessionGate.tsx
+
 import { Navigate } from 'react-router-dom';
 import PageLoading from './PageLoading';
 import { useSessionGate } from '../hooks/useSessionGate';

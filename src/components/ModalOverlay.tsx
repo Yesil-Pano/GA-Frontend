@@ -1,3 +1,5 @@
+// src/components/ModalOverlay.tsx
+
 import { createPortal } from 'react-dom';
 import type { MouseEventHandler, ReactNode } from 'react';
 
@@ -17,7 +19,7 @@ export default function ModalOverlay({ children, className = '', onClick }: Moda
     <div
       role="presentation"
       onClick={onClick}
-      className={`fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-sm ${
+      className={`fixed inset-0 z-200 flex items-center justify-center p-4 backdrop-blur-sm ${
         hasCustomBg ? '' : 'bg-slate-900/60'
       } ${className}`.trim().replace(/\s+/g, ' ')}
     >

@@ -1,3 +1,5 @@
+// src/components/PageLoading.tsx
+
 type PageLoadingProps = {
   /** panel: sol liste / içerik alanı; page: tam sayfa yüksekliği */
   variant?: 'page' | 'panel';

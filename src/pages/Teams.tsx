@@ -1,11 +1,12 @@
 // src/pages/Teams.tsx
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerColor, resolvePartnerKey } from '../utils/partners';
-import { isSuperAdmin } from '../utils/authSession';
+import { isSuperAdmin, isTenantAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 import PageLoading from '../components/PageLoading';
 
@@ -179,7 +180,9 @@ export default function Teams() {
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [authDocInputKey, setAuthDocInputKey] = useState(0);
   const [personnelDocInputKey, setPersonnelDocInputKey] = useState(0);
-  const [canManageAuthorizationDocuments, setCanManageAuthorizationDocuments] = useState(false);
+  const [canManageAuthorizationDocuments, setCanManageAuthorizationDocuments] = useState(
+    () => isSuperAdmin() || isTenantAdmin(),
+  );
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [docsModalFilter, setDocsModalFilter] = useState<'all' | 'Authorization' | 'Personnel'>('all');
   const [teamDocuments, setTeamDocuments] = useState<TeamDocumentItem[]>([]);
@@ -193,6 +196,9 @@ export default function Teams() {
   const [reassigningOccurrenceId, setReassigningOccurrenceId] = useState<string | null>(null);
 
   const isSuperAdminUser = isSuperAdmin();
+  const isTenantAdminUser = isTenantAdmin();
+  const canManageTeamDocuments =
+    canManageAuthorizationDocuments || isSuperAdminUser || isTenantAdminUser;
 
   const reloadDataForSubmit = useCallback(async () => {
     try {
@@ -228,16 +234,26 @@ export default function Teams() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!isFormOpen || !isSuperAdminUser) return;
+  const handleTenantChange = useCallback((tenantId: string) => {
+    setFormData((prev) => ({ ...prev, tenantId }));
+    setSelectedProjectIds([]);
+    if (!tenantId) {
+      setProjects([]);
+      return;
+    }
+    void loadProjectsForCreate(tenantId);
+  }, [loadProjectsForCreate]);
+
+  const openCreateForm = useCallback(() => {
+    setIsFormOpen(true);
+    if (!isSuperAdminUser) return;
+    setSelectedProjectIds([]);
     if (!formData.tenantId) {
       setProjects([]);
-      setSelectedProjectIds([]);
       return;
     }
     void loadProjectsForCreate(formData.tenantId);
-    setSelectedProjectIds([]);
-  }, [isFormOpen, isSuperAdminUser, formData.tenantId, loadProjectsForCreate]);
+  }, [isSuperAdminUser, formData.tenantId, loadProjectsForCreate]);
 
   useEffect(() => {
     let isMounted = true;
@@ -248,7 +264,10 @@ export default function Teams() {
           api.get('/teams'),
           api.get('/workorders'),
           api.get('/teams/lookups'),
-          api.get<{ canManageAuthorizationDocuments?: boolean }>('/teams/capabilities').catch(() => ({ data: { canManageAuthorizationDocuments: false } })),
+          api.get<{ canManageAuthorizationDocuments?: boolean }>('/teams/capabilities').catch((err) => {
+            console.warn('Teams capabilities alınamadı; rol bazlı varsayılan kullanılıyor.', err);
+            return { data: { canManageAuthorizationDocuments: false } };
+          }),
         ]);
 
         let tenantList: TenantLookup[] = [];
@@ -262,7 +281,9 @@ export default function Teams() {
           setAllWorkOrders(ordersRes.data);
           setProjects(lookupsRes.data);
           setGlobalTenants(tenantList);
-          setCanManageAuthorizationDocuments(!!capsRes.data?.canManageAuthorizationDocuments);
+          setCanManageAuthorizationDocuments(
+            !!capsRes.data?.canManageAuthorizationDocuments || isSuperAdminUser || isTenantAdminUser,
+          );
         }
       } catch (error) {
         console.error("İlk yükleme hatası:", error);
@@ -273,7 +294,7 @@ export default function Teams() {
 
     initPageData();
     return () => { isMounted = false; };
-  }, [isSuperAdminUser, partnerKey]);
+  }, [isSuperAdminUser, isTenantAdminUser, partnerKey]);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -587,7 +608,7 @@ export default function Teams() {
   };
 
   const openDocumentsModal = async (filter: 'all' | 'Authorization' | 'Personnel' = 'all') => {
-    if (!selectedTeam || !canManageAuthorizationDocuments) return;
+    if (!selectedTeam || !canManageTeamDocuments) return;
     setDocsModalFilter(filter);
     setIsDocsModalOpen(true);
     await loadTeamDocuments(selectedTeam.id);
@@ -727,7 +748,7 @@ export default function Teams() {
             >
               {refreshingLocations ? 'Güncelleniyor...' : '📍 Güncelle'}
             </button>
-            <button onClick={() => setIsFormOpen(true)} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition">
+            <button onClick={openCreateForm} className="px-4 py-2 bg-white border border-blue-500 text-blue-500 rounded-lg text-sm font-bold hover:bg-blue-50 transition">
               + Ekip Ekle
             </button>
           </div>
@@ -753,12 +774,12 @@ export default function Teams() {
               <div className="mb-2">
                 <label className="flex min-w-0 cursor-pointer items-start gap-3" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" className="ga-checkbox mt-0.5" />
-                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors break-words leading-snug">{team.name}</span>
+                  <span className="font-bold text-brand-navy text-base group-hover:text-brand-orange transition-colors wrap-break-word leading-snug">{team.name}</span>
                 </label>
               </div>
 
               <div className="space-y-1 text-xs text-slate-700 font-medium pl-7">
-                <div className="flex"><span className="w-28 text-slate-400 font-bold">Proje:</span><span className="flex-1 font-bold text-slate-600 break-words" title={team.project}>{team.project}</span></div>
+                <div className="flex"><span className="w-28 text-slate-400 font-bold">Proje:</span><span className="flex-1 font-bold text-slate-600 wrap-break-word" title={team.project}>{team.project}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Araç Plakası:</span><span className="flex-1 font-bold text-slate-600">{team.plate || 'Atanmamış'}</span></div>
                 <div className="flex"><span className="w-28 text-slate-400 font-bold">Telefon Numarası:</span><span className="flex-1 font-bold text-slate-600">{team.phone}</span></div>
                 {/* 🚀 LİSTEDE İL VE İLÇE GÖSTERİMİ */}
@@ -803,7 +824,7 @@ export default function Teams() {
           {isSuperAdminUser && (
             <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-200 mb-2 animate-fadeIn">
               <label className="block text-xs font-bold text-orange-800 mb-1 uppercase tracking-wider">🏢 Hedef Firma Seçiniz (Super Admin Yetkisi)</label>
-              <select required className="w-full border border-orange-300 rounded-lg p-2.5 bg-white text-xs font-bold focus:ring-2 focus:ring-brand-orange outline-none" value={formData.tenantId} onChange={e => setFormData({...formData, tenantId: e.target.value})}>
+              <select required className="w-full border border-orange-300 rounded-lg p-2.5 bg-white text-xs font-bold focus:ring-2 focus:ring-brand-orange outline-none" value={formData.tenantId} onChange={e => handleTenantChange(e.target.value)}>
                 <option value="">Firma Seçiniz...</option>
                 {globalTenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
@@ -967,7 +988,7 @@ export default function Teams() {
                       <input disabled={!isEditingModal} className={`w-full border rounded-lg p-2.5 font-semibold outline-none ${isEditingModal ? 'bg-white border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-slate-50 border-slate-200 cursor-not-allowed text-slate-700'}`} value={editFormData.plate} onChange={e => setEditFormData({...editFormData, plate: e.target.value})} />
                     </div>
 
-                    {canManageAuthorizationDocuments && (
+                    {canManageTeamDocuments && (
                     <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Sol: Yetki Belgesi */}
                       <div>
@@ -1373,7 +1394,7 @@ export default function Teams() {
                       <p className="text-[11px] font-semibold text-slate-700">{occ.assignedToUserName}</p>
                       <div className="flex flex-wrap gap-1.5 sm:justify-end">
                         <select
-                          className="border border-slate-300 rounded-lg p-1.5 text-[11px] font-semibold min-w-[7rem]"
+                          className="border border-slate-300 rounded-lg p-1.5 text-[11px] font-semibold min-w-28"
                           value={reassignByOccurrence[occ.id] ?? ''}
                           onChange={(e) => setReassignByOccurrence((prev) => ({ ...prev, [occ.id]: e.target.value }))}
                         >

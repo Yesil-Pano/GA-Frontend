@@ -1,8 +1,9 @@
 // ga-frontend/src/layouts/MainLayout.tsx
+
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
-import MapView, { DEFAULT_MAP_CENTER } from '../components/MapView';
-import type { MapMarker } from '../components/MapView';
+import MapView from '../components/MapView';
+import { DEFAULT_MAP_CENTER, type MapMarker } from '../components/mapViewTypes';
 import api from '../services/api';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import logoImg from '../assets/logo.png';

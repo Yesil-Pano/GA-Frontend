@@ -1,4 +1,5 @@
 // ga-frontend/src/components/MapView.tsx
+
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -8,21 +9,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import 'leaflet.markercluster';
 import { MIXED_CLUSTER_COLOR } from '../utils/partners';
-
-export interface MapMarker {
-  id: string;
-  title: string;
-  subtitle?: string;
-  position: [number, number];
-  priority?: string;
-  type: 'Saha' | 'Nokta';
-  /** Firma rengi (hex). Yoksa varsayılan turuncu / mavi. */
-  partnerColor?: string;
-  partnerName?: string;
-}
-
-/** Türkiye geneli — MainLayout ile aynı varsayılan */
-export const DEFAULT_MAP_CENTER: [number, number] = [37.420, 31.848];
+import { DEFAULT_MAP_CENTER, type MapMarker } from './mapViewTypes';
 const DEFAULT_MAP_ZOOM = 6;
 const FOCUS_ZOOM = 14;
 

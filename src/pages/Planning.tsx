@@ -1,4 +1,5 @@
 // src/pages/Planning.tsx
+
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
@@ -62,7 +63,7 @@ export default function Planning() {
 
       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
         {isLoading ? (
-          <PageLoading variant="panel" className="min-h-[240px] rounded-lg" />
+          <PageLoading variant="panel" className="min-h-60 rounded-lg" />
         ) : periodicJobs.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-slate-400 text-sm font-medium">📭 Sistemde henüz tanımlı aktif bir periyodik iş emri döngüsü bulunmuyor.</p>

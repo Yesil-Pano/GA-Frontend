@@ -1,4 +1,5 @@
 // src/pages/Timesheet.tsx
+
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
@@ -134,7 +135,7 @@ export default function Timesheet() {
     return () => {
       isMounted = false;
     };
-  }, [partnerKey]);
+  }, [partnerKey, isSuperAdminUser]);
 
   // SÜZGEÇTEN GEÇEN İŞ EMİRLERİ
   const filteredOrders = orders.filter(o => {
