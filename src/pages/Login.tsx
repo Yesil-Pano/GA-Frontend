@@ -19,6 +19,25 @@ interface AxiosErrorResponse {
   };
 }
 
+interface AuthLoginResponse {
+  token?: string;
+  refreshToken?: string;
+  userId?: string;
+  username?: string;
+  fullName?: string;
+  roles?: string[];
+}
+
+function isHtmlPayload(data: unknown): boolean {
+  return typeof data === 'string' && /^\s*</.test(data);
+}
+
+function parseLoginResponse(data: unknown): AuthLoginResponse | null {
+  if (!data || typeof data !== 'object' || isHtmlPayload(data)) return null;
+  const payload = data as AuthLoginResponse;
+  return typeof payload.token === 'string' && payload.token.length > 0 ? payload : null;
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,17 +57,25 @@ export default function Login() {
         password: password,
       });
 
+      const loginData = parseLoginResponse(response.data);
+      if (!loginData) {
+        setError(
+          'Sunucu yapılandırma hatası: /api istekleri backend uygulamasına ulaşmıyor (HTML yanıtı geldi). Nginx üzerinde /api ve /hubs yönlendirmesi kontrol edilmeli.',
+        );
+        return;
+      }
+
       saveSessionTokens(
-        response.data.token,
-        response.data.refreshToken ?? null,
+        loginData.token!,
+        loginData.refreshToken ?? null,
         rememberMe,
       );
 
       saveAuthProfileFromLogin({
-        userId: response.data.userId,
-        username: response.data.username,
-        fullName: response.data.fullName,
-        roles: response.data.roles ?? [],
+        userId: loginData.userId,
+        username: loginData.username,
+        fullName: loginData.fullName,
+        roles: loginData.roles ?? [],
       });
 
       try {
@@ -60,8 +87,8 @@ export default function Login() {
 
       localStorage.setItem('isAuthenticated', 'true');
       localStorage.setItem('user', JSON.stringify({
-        username: response.data.username,
-        fullName: response.data.fullName,
+        username: loginData.username,
+        fullName: loginData.fullName,
       }));
 
       navigate('/');

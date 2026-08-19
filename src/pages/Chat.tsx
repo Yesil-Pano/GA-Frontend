@@ -11,6 +11,7 @@ import { isAxiosError } from 'axios';
 import { CheckCheck, MessageCircle, Search, Send } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
+import { getHubBaseUrl } from '../services/apiConfig';
 import { formatTurkeyDateTime } from '../utils/dateTime';
 import { getAuthProfile } from '../utils/authSession';
 import { registerWebPushIfNeeded } from '../utils/webPush';
@@ -40,9 +41,8 @@ interface DirectMessage {
   isReadByOther: boolean;
 }
 
-function getHubBaseUrl(): string {
-  const base = String(api.defaults.baseURL || '').replace(/\/api\/?$/, '');
-  return `${base}/hubs/chat`;
+function getChatHubUrl(): string {
+  return getHubBaseUrl('/hubs/chat');
 }
 
 function formatTime(iso: string | null): string {
@@ -247,7 +247,7 @@ const Chat: React.FC = () => {
         const { getAccessToken } = await import('../utils/sessionTokens');
         const token = getAccessToken();
         const connection = new HubConnectionBuilder()
-          .withUrl(getHubBaseUrl(), { accessTokenFactory: () => token || '' })
+          .withUrl(getChatHubUrl(), { accessTokenFactory: () => token || '' })
           .withAutomaticReconnect()
           .configureLogging(LogLevel.Warning)
           .build();

@@ -8,27 +8,36 @@ import {
   shouldRefreshAccessToken,
   tryRefreshSession,
 } from '../utils/sessionTokens';
+import { API_BASE_URL } from './apiConfig';
 
 const api = axios.create({
-  // baseURL: 'https://204.168.249.86:8443/api',
-  baseURL: 'https://gorevadami.net/api',
+  baseURL: API_BASE_URL,
 });
 
 type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
+function isPublicAuthRequest(url?: string): boolean {
+  if (!url) return false;
+  return url.includes('/auth/login')
+    || url.includes('/auth/refresh')
+    || url.includes('/auth/logout');
+}
+
 api.interceptors.request.use(async (config) => {
-  let token = getAccessToken();
+  const publicAuth = isPublicAuthRequest(config.url);
+  let token = publicAuth ? null : getAccessToken();
+
   if (token && shouldRefreshAccessToken(token, 30)) {
     await tryRefreshSession();
     token = getAccessToken();
   }
 
-  if (token) {
+  if (token && !publicAuth) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
   try {
-    if (token && isSuperAdmin()) {
+    if (token && !publicAuth && isSuperAdmin()) {
       const partnerKey = getStoredPartnerKey();
       config.params = { ...(config.params || {}), partnerKey };
     }
@@ -68,7 +77,9 @@ api.interceptors.response.use(
       if (code === 'DEMO_EXPIRED') {
         sessionStorage.setItem('ga_logout_reason', 'Demo süreniz dolmuştur. Erişim kapatıldı.');
       }
-      window.location.href = '/login';
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   },

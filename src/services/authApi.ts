@@ -1,9 +1,10 @@
 // src/services/authApi.ts
 
 import axios from 'axios';
+import { API_BASE_URL } from './apiConfig';
 
 const authClient = axios.create({
-  baseURL: 'https://204.168.249.86:8443/api',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 

@@ -145,6 +145,7 @@ export default function Teams() {
   const [allWorkOrders, setAllWorkOrders] = useState<AssignedWorkOrder[]>([]); 
   const [projects, setProjects] = useState<ProjectLookup[]>([]);
   const [createFormProjects, setCreateFormProjects] = useState<ProjectLookup[]>([]);
+  const [editLookupProjects, setEditLookupProjects] = useState<ProjectLookup[]>([]);
   const [globalTenants, setGlobalTenants] = useState<TenantLookup[]>([]); 
   
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -204,8 +205,11 @@ export default function Teams() {
 
   const teamLookupParams = useCallback((tenantIdFilter?: string) => {
     const params: Record<string, string> = {};
-    if (partnerKey && partnerKey !== 'all') params.partnerKey = partnerKey;
-    if (tenantIdFilter) params.tenantIdFilter = tenantIdFilter;
+    if (tenantIdFilter) {
+      params.tenantIdFilter = tenantIdFilter;
+    } else if (partnerKey && partnerKey !== 'all') {
+      params.partnerKey = partnerKey;
+    }
     return Object.keys(params).length > 0 ? params : undefined;
   }, [partnerKey]);
 
@@ -227,6 +231,18 @@ export default function Teams() {
       }
     } catch (error) {
       console.error("Veri yenilenirken hata:", error);
+    }
+  }, [teamLookupParams]);
+
+  const loadProjectsForEdit = useCallback(async (tenantId?: string) => {
+    try {
+      const { data } = await api.get<ProjectLookup[]>('/teams/lookups', {
+        params: teamLookupParams(tenantId),
+      });
+      setEditLookupProjects(data);
+    } catch (error) {
+      console.error('Düzenleme proje listesi yüklenemedi:', error);
+      setEditLookupProjects([]);
     }
   }, [teamLookupParams]);
 
@@ -405,6 +421,7 @@ export default function Teams() {
       lng: team.position[1] || 32.85411,
     });
     setEditProjectIds(team.projectIds || []);
+    void loadProjectsForEdit(isSuperAdminUser ? team.tenantId : undefined);
     setActiveTab('details');
     setAssignedJobStatusFilter('Tümü');
     setAssignedJobSearch('');
@@ -448,15 +465,16 @@ export default function Teams() {
     trIncludes(team.plate, searchTerm)
   );
 
-  /** Düzenleme: lookups + personelin mevcut atamaları (çoklu seçim) */
+  /** Düzenleme: firma kapsamındaki lookups + personelin mevcut atamaları */
   const editProjectOptions = useMemo(() => {
     const map = new Map<string, ProjectLookup>();
+    for (const p of editLookupProjects) map.set(p.id, p);
     for (const p of projects) map.set(p.id, p);
     for (const p of selectedTeam?.assignedProjects || []) {
       if (!map.has(p.id)) map.set(p.id, { id: p.id, name: p.name });
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-  }, [projects, selectedTeam?.assignedProjects]);
+  }, [editLookupProjects, projects, selectedTeam?.assignedProjects]);
 
   const teamAssignedJobsAll = useMemo(
     () =>
@@ -1190,7 +1208,12 @@ export default function Teams() {
               <div className="flex gap-2">
                 {!isEditingModal && activeTab === 'details' && (
                   <>
-                    <button onClick={() => setIsEditingModal(true)} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition">✏️ Ekibi Düzenle</button>
+                    <button onClick={() => {
+                      setIsEditingModal(true);
+                      if (selectedTeam?.tenantId) {
+                        void loadProjectsForEdit(isSuperAdminUser ? selectedTeam.tenantId : undefined);
+                      }
+                    }} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl hover:bg-blue-700 shadow transition">✏️ Ekibi Düzenle</button>
                     <button
                       type="button"
                       onClick={handleDeleteTeam}
