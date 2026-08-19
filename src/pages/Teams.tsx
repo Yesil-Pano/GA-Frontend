@@ -84,6 +84,7 @@ interface AxiosErrorResponse {
   response?: {
     data?: {
       message?: string;
+      Message?: string;
     };
   };
 }
@@ -143,6 +144,7 @@ export default function Teams() {
   const [teams, setTeams] = useState<TeamMemberData[]>([]);
   const [allWorkOrders, setAllWorkOrders] = useState<AssignedWorkOrder[]>([]); 
   const [projects, setProjects] = useState<ProjectLookup[]>([]);
+  const [createFormProjects, setCreateFormProjects] = useState<ProjectLookup[]>([]);
   const [globalTenants, setGlobalTenants] = useState<TenantLookup[]>([]); 
   
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -200,14 +202,19 @@ export default function Teams() {
   const canManageTeamDocuments =
     canManageAuthorizationDocuments || isSuperAdminUser || isTenantAdminUser;
 
+  const teamLookupParams = useCallback((tenantIdFilter?: string) => {
+    const params: Record<string, string> = {};
+    if (partnerKey && partnerKey !== 'all') params.partnerKey = partnerKey;
+    if (tenantIdFilter) params.tenantIdFilter = tenantIdFilter;
+    return Object.keys(params).length > 0 ? params : undefined;
+  }, [partnerKey]);
+
   const reloadDataForSubmit = useCallback(async () => {
     try {
       const [teamsRes, ordersRes, lookupsRes] = await Promise.all([
         api.get('/teams'),
         api.get('/workorders'),
-        api.get('/teams/lookups', {
-          params: isSuperAdminUser && formData.tenantId ? { tenantIdFilter: formData.tenantId } : undefined,
-        }),
+        api.get('/teams/lookups', { params: teamLookupParams() }),
       ]);
 
       setTeams(teamsRes.data);
@@ -215,30 +222,31 @@ export default function Teams() {
       setProjects(lookupsRes.data);
 
       if (isSuperAdminUser) {
-        const tenantsRes = await api.get('/superadmin/tenants');
+        const tenantsRes = await api.get('/users/tenants');
         setGlobalTenants(tenantsRes.data);
       }
     } catch (error) {
       console.error("Veri yenilenirken hata:", error);
     }
-  }, [isSuperAdminUser, formData.tenantId]);
+  }, [teamLookupParams]);
 
   const loadProjectsForCreate = useCallback(async (tenantId?: string) => {
     try {
-      const { data } = await api.get('/teams/lookups', {
-        params: tenantId ? { tenantIdFilter: tenantId } : undefined,
+      const { data } = await api.get<ProjectLookup[]>('/teams/lookups', {
+        params: teamLookupParams(tenantId),
       });
-      setProjects(data);
+      setCreateFormProjects(data);
     } catch (error) {
       console.error('Proje listesi yüklenemedi:', error);
+      setCreateFormProjects([]);
     }
-  }, []);
+  }, [teamLookupParams]);
 
   const handleTenantChange = useCallback((tenantId: string) => {
     setFormData((prev) => ({ ...prev, tenantId }));
     setSelectedProjectIds([]);
     if (!tenantId) {
-      setProjects([]);
+      setCreateFormProjects([]);
       return;
     }
     void loadProjectsForCreate(tenantId);
@@ -246,13 +254,16 @@ export default function Teams() {
 
   const openCreateForm = useCallback(() => {
     setIsFormOpen(true);
-    if (!isSuperAdminUser) return;
     setSelectedProjectIds([]);
-    if (!formData.tenantId) {
-      setProjects([]);
+    if (isSuperAdminUser) {
+      if (!formData.tenantId) {
+        setCreateFormProjects([]);
+        return;
+      }
+      void loadProjectsForCreate(formData.tenantId);
       return;
     }
-    void loadProjectsForCreate(formData.tenantId);
+    void loadProjectsForCreate();
   }, [isSuperAdminUser, formData.tenantId, loadProjectsForCreate]);
 
   useEffect(() => {
@@ -263,7 +274,7 @@ export default function Teams() {
         const [teamsRes, ordersRes, lookupsRes, capsRes] = await Promise.all([
           api.get('/teams'),
           api.get('/workorders'),
-          api.get('/teams/lookups'),
+          api.get('/teams/lookups', { params: teamLookupParams() }),
           api.get<{ canManageAuthorizationDocuments?: boolean }>('/teams/capabilities').catch((err) => {
             console.warn('Teams capabilities alınamadı; rol bazlı varsayılan kullanılıyor.', err);
             return { data: { canManageAuthorizationDocuments: false } };
@@ -272,7 +283,7 @@ export default function Teams() {
 
         let tenantList: TenantLookup[] = [];
         if (isSuperAdminUser) {
-          const tenantsRes = await api.get('/superadmin/tenants');
+          const tenantsRes = await api.get('/users/tenants');
           tenantList = tenantsRes.data;
         }
 
@@ -294,7 +305,7 @@ export default function Teams() {
 
     initPageData();
     return () => { isMounted = false; };
-  }, [isSuperAdminUser, isTenantAdminUser, partnerKey]);
+  }, [isSuperAdminUser, isTenantAdminUser, partnerKey, teamLookupParams]);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,15 +326,18 @@ export default function Teams() {
         latitude: formData.lat,
         longitude: formData.lng,
         projectIds: selectedProjectIds,
+      }, {
+        params: teamLookupParams(isSuperAdminUser ? formData.tenantId : undefined),
       });
       setIsFormOpen(false);
       setFormData({ name: '', username: '', email: '', password: '', phone: '', teamLeader: '', plate: '', address: '', city: '', district: '', tenantId: '', lat: 39.92077, lng: 32.85411 });
       setSelectedProjectIds([]);
+      setCreateFormProjects([]);
       await reloadDataForSubmit();
     } catch (err) {
       const error = err as AxiosErrorResponse;
       console.error(error);
-      alert(error.response?.data?.message || "Ekip eklenemedi.");
+      alert(error.response?.data?.message || error.response?.data?.Message || 'Ekip eklenemedi.');
     } finally {
       setIsSubmitting(false);
     }
@@ -345,6 +359,8 @@ export default function Teams() {
         longitude: lng,
         projectIds: editProjectIds,
         ...(password.trim() ? { password: password.trim() } : {}),
+      }, {
+        params: teamLookupParams(),
       });
       setIsEditingModal(false);
       setIsDetailModalOpen(false);
@@ -869,10 +885,10 @@ export default function Teams() {
             <div className="w-full border border-slate-300 rounded-xl p-3 bg-slate-50 max-h-40 overflow-y-auto space-y-2.5 shadow-inner">
               {isSuperAdminUser && !formData.tenantId ? (
                 <p className="text-[11px] text-slate-400 font-medium">Önce hedef firma seçin.</p>
-              ) : projects.length === 0 ? (
+              ) : createFormProjects.length === 0 ? (
                 <p className="text-[11px] text-slate-400 font-medium">Bu firma için seçilebilir proje bulunamadı.</p>
               ) : (
-              projects.map((proj) => (
+              createFormProjects.map((proj) => (
                 <label key={proj.id} className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-slate-700">
                   <input type="checkbox" className="ga-checkbox" checked={selectedProjectIds.includes(proj.id)} onChange={() => setSelectedProjectIds(prev => prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id])} />
                   <span>{proj.name}</span>

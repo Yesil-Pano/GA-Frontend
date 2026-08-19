@@ -23,6 +23,7 @@ import {
   uploadWorkOrderPhotos,
   type PendingOpeningAttachment,
 } from '../utils/openingAttachments';
+import { PHOTO_CATEGORY_ISG, PHOTO_CATEGORY_OPERASYON, PHOTO_LIMITS } from '../constants/photos';
 
 interface WorkOrderData {
   id: string;
@@ -713,6 +714,10 @@ export default function WorkOrders() {
 
   const openingPhotos = orderPhotos.filter((p) => p.category === 'ACILIS');
   const remainingOpeningSlots = Math.max(0, MAX_OPENING_ATTACHMENTS - openingPhotos.length);
+  const isgPhotos = orderPhotos.filter((p) => p.category === 'ISG');
+  const operasyonPhotos = orderPhotos.filter((p) => p.category === 'OPERASYON');
+  const remainingIsgSlots = Math.max(0, PHOTO_LIMITS[PHOTO_CATEGORY_ISG] - isgPhotos.length);
+  const remainingOperasyonSlots = Math.max(0, PHOTO_LIMITS[PHOTO_CATEGORY_OPERASYON] - operasyonPhotos.length);
 
   const visiblePhotoCategories = (['ISG', 'OPERASYON', 'DIGER'] as const).filter((category) => {
     if (category === 'ISG') return canViewIsgPhotos;
@@ -1524,21 +1529,33 @@ export default function WorkOrders() {
                           ))}
                         </div>
                       )}
-                      {isEditingDetail && category === 'ISG' && (
+                      {isEditingDetail && category === 'ISG' && remainingIsgSlots > 0 && (
                         <WorkOrderPhotoPicker
                           title="Yeni İSG Fotoğrafı"
                           hint="JPEG, PNG veya WebP (max 10 MB)"
+                          maxCount={remainingIsgSlots}
                           attachments={pendingIsgAttachments}
                           onChange={setPendingIsgAttachments}
                         />
                       )}
-                      {isEditingDetail && category === 'OPERASYON' && (
+                      {isEditingDetail && category === 'ISG' && remainingIsgSlots === 0 && isgPhotos.length >= PHOTO_LIMITS[PHOTO_CATEGORY_ISG] && (
+                        <p className="text-xs text-amber-700 font-semibold bg-amber-50 border border-amber-100 rounded-lg p-3">
+                          En fazla {PHOTO_LIMITS[PHOTO_CATEGORY_ISG]} İSG fotoğrafı yüklenebilir.
+                        </p>
+                      )}
+                      {isEditingDetail && category === 'OPERASYON' && remainingOperasyonSlots > 0 && (
                         <WorkOrderPhotoPicker
                           title="Yeni Operasyoncu Fotoğrafı"
                           hint="JPEG, PNG veya WebP (max 10 MB)"
+                          maxCount={remainingOperasyonSlots}
                           attachments={pendingOperasyonAttachments}
                           onChange={setPendingOperasyonAttachments}
                         />
+                      )}
+                      {isEditingDetail && category === 'OPERASYON' && remainingOperasyonSlots === 0 && operasyonPhotos.length >= PHOTO_LIMITS[PHOTO_CATEGORY_OPERASYON] && (
+                        <p className="text-xs text-amber-700 font-semibold bg-amber-50 border border-amber-100 rounded-lg p-3">
+                          En fazla {PHOTO_LIMITS[PHOTO_CATEGORY_OPERASYON]} operasyoncu fotoğrafı yüklenebilir.
+                        </p>
                       )}
                     </div>
                   );

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../services/api';
+import { getAuthProfile } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 import PageLoading from '../components/PageLoading';
 
@@ -131,6 +132,7 @@ export default function Users() {
   const [form, setForm] = useState<UserFormState>(EMPTY_FORM);
   const [lockedSuperAdmin, setLockedSuperAdmin] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [search, setSearch] = useState('');
   const [tenantFilter, setTenantFilter] = useState('');
@@ -289,6 +291,32 @@ export default function Users() {
   const errMsg = (err: unknown) => {
     const error = err as AxiosErrorResponse;
     return error.response?.data?.message || 'İşlem başarısız.';
+  };
+
+  const currentUserId = getAuthProfile()?.userId ?? '';
+  const canDeleteCurrentUser =
+    modalMode === 'edit'
+    && editingUserId
+    && editingUserId !== currentUserId
+    && !lockedSuperAdmin;
+
+  const handleDelete = async (userId?: string) => {
+    const targetId = userId ?? editingUserId;
+    if (!targetId) return;
+    const user = users.find((u) => u.id === targetId);
+    if (!user) return;
+    if (!window.confirm(`"${user.fullName}" kullanıcısını silmek istediğinize emin misiniz?\n\nHesap devre dışı bırakılır; açık iş emirleri Atanmamış'a çekilir.`)) return;
+
+    setIsDeleting(true);
+    try {
+      await api.delete(`/users/${targetId}`);
+      await loadUsers();
+      if (editingUserId === targetId) closeModal();
+    } catch (err) {
+      alert(errMsg(err));
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -452,22 +480,22 @@ export default function Users() {
                   Durum <span className="text-slate-400 text-xs">{sortIndicator('status')}</span>
                 </button>
               </th>
+              <th className="p-4 font-semibold text-slate-700 w-28">İşlem</th>
             </tr>
           </thead>
           <tbody>
             {paginatedUsers.map((user) => (
               <tr
                 key={user.id}
-                onClick={() => openEdit(user)}
-                className="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer"
+                className="border-b border-slate-100 hover:bg-slate-50 transition"
               >
-                <td className="p-4">
+                <td className="p-4 cursor-pointer" onClick={() => openEdit(user)}>
                   <div className="font-medium text-slate-800">{user.fullName}</div>
                   <div className="text-sm text-slate-500">{user.email}</div>
                   <div className="text-xs text-slate-400 mt-0.5">@{user.username}</div>
                 </td>
-                <td className="p-4 text-sm text-slate-700">{user.tenantName}</td>
-                <td className="p-4">
+                <td className="p-4 text-sm text-slate-700 cursor-pointer" onClick={() => openEdit(user)}>{user.tenantName}</td>
+                <td className="p-4 cursor-pointer" onClick={() => openEdit(user)}>
                   <div className="flex flex-wrap gap-1">
                     {user.roles.map((role) => (
                       <span
@@ -483,18 +511,42 @@ export default function Users() {
                     ))}
                   </div>
                 </td>
-                <td className="p-4">
+                <td className="p-4 cursor-pointer" onClick={() => openEdit(user)}>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     user.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                   }`}>
                     {user.isActive ? 'Aktif' : 'Pasif'}
                   </span>
                 </td>
+                <td className="p-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(user)}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-800"
+                    >
+                      Düzenle
+                    </button>
+                    {user.id !== currentUserId && !user.roles.includes(SUPER_ADMIN_ROLE) && (
+                      <button
+                        type="button"
+                        disabled={isDeleting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDelete(user.id);
+                        }}
+                        className="text-xs font-bold text-rose-600 hover:text-rose-800 disabled:opacity-50"
+                      >
+                        Sil
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {sortedUsers.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-400 text-sm">
+                <td colSpan={5} className="p-8 text-center text-slate-400 text-sm">
                   {users.length === 0 ? 'Henüz kullanıcı yok.' : 'Filtrelere uygun kullanıcı bulunamadı.'}
                 </td>
               </tr>
@@ -672,7 +724,20 @@ export default function Users() {
               </label>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
+            <div className="flex justify-between items-center gap-2 mt-6">
+              <div>
+                {canDeleteCurrentUser && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete()}
+                    disabled={isDeleting || isSaving}
+                    className="px-4 py-2 rounded-lg bg-rose-50 text-rose-700 font-semibold border border-rose-200 hover:bg-rose-100 disabled:opacity-60"
+                  >
+                    {isDeleting ? 'Siliniyor...' : 'Kullanıcıyı Sil'}
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
               <button
                 type="button"
                 onClick={closeModal}
@@ -683,11 +748,12 @@ export default function Users() {
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || isDeleting}
                 className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-60"
               >
                 {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
               </button>
+              </div>
             </div>
           </div>
         </ModalOverlay>
