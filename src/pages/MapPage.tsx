@@ -7,7 +7,12 @@ import api from '../services/api';
 import axios from 'axios';
 import { trIncludes } from '../utils/trSearch';
 import { getPartnerByKey, getPartnerColor, resolvePartnerKey, type PartnerKey } from '../utils/partners';
-import { isSuperAdmin, getAuthProfile, canManageStations } from '../utils/authSession';
+import {
+  isSuperAdmin,
+  getAuthProfile,
+  canManageStations,
+  requiresYesilPanoOperationSupervisor,
+} from '../utils/authSession';
 import { mergeOfficeAndFieldPersonnel } from '../utils/personnelLookups';
 import ModalOverlay from '../components/ModalOverlay';
 import PageLoading from '../components/PageLoading';
@@ -175,10 +180,12 @@ const StationListCard = memo(function StationListCard({
 export default function MapPage() {
   const navigate = useNavigate();
   const isSuperAdminUser = isSuperAdmin();
+  const requiresYesilPanoOps = requiresYesilPanoOperationSupervisor();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusTypeFilter, setStatusTypeFilter] = useState<StationStatusFilter>('Tümü');
   const [personnel, setPersonnel] = useState<PersonnelLookup[]>([]);
   const [officeUsers, setOfficeUsers] = useState<PersonnelLookup[]>([]);
+  const [operationSupervisors, setOperationSupervisors] = useState<PersonnelLookup[]>([]);
   const [workTypes, setWorkTypes] = useState<string[]>(['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu']);
   const [workCategories, setWorkCategories] = useState<string[]>([
     'Arıza Bildirimi', 'YG İşletme Sorumluluğu Talebi', 'YG Bakım', 'AG Bakım',
@@ -353,6 +360,16 @@ export default function MapPage() {
     [isSuperAdminUser, officeUsers, personnel],
   );
 
+  const operationSupervisorOptions = useMemo(
+    () => (operationSupervisors.length > 0 ? operationSupervisors : operationAssigneeOptions),
+    [operationSupervisors, operationAssigneeOptions],
+  );
+
+  const openedByOptions = useMemo(
+    () => (requiresYesilPanoOps ? officeUsers : operationAssigneeOptions),
+    [requiresYesilPanoOps, officeUsers, operationAssigneeOptions],
+  );
+
   const [prevPartnerKey, setPrevPartnerKey] = useState(partnerKey);
 
   if (partnerKey !== prevPartnerKey) {
@@ -360,6 +377,7 @@ export default function MapPage() {
     setLookupsLoaded(false);
     setPersonnel([]);
     setOfficeUsers([]);
+    setOperationSupervisors([]);
     if (isBulkOpen) setLookupsLoading(true);
   }
 
@@ -403,8 +421,12 @@ export default function MapPage() {
         const mappedOffice = (backendData?.officeUsers ?? []).map(
           (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
         );
+        const mappedOps = (backendData?.operationSupervisors ?? []).map(
+          (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
+        );
         setPersonnel(mappedField);
         setOfficeUsers(mappedOffice);
+        setOperationSupervisors(mappedOps);
         if (Array.isArray(backendData?.types) && backendData.types.length > 0) {
           setWorkTypes(backendData.types);
         }
@@ -415,15 +437,20 @@ export default function MapPage() {
         const assigneePool = isSuperAdminUser
           ? mergeOfficeAndFieldPersonnel(mappedOffice, mappedField)
           : mappedOffice;
-        const defaultOfficeId =
-          meId && assigneePool.some((u: PersonnelLookup) => u.id === meId)
+        const defaultOpenedById =
+          meId && mappedOffice.some((u: PersonnelLookup) => u.id === meId)
             ? meId
-            : (assigneePool[0]?.id ?? '');
-        if (assigneePool.length > 0 || mappedField.length > 0) {
+            : (mappedOffice[0]?.id ?? assigneePool[0]?.id ?? '');
+        const defaultOpsId = requiresYesilPanoOperationSupervisor()
+          ? (mappedOps[0]?.id ?? '')
+          : (meId && assigneePool.some((u: PersonnelLookup) => u.id === meId)
+            ? meId
+            : (assigneePool[0]?.id ?? ''));
+        if (assigneePool.length > 0 || mappedField.length > 0 || mappedOps.length > 0) {
           setBulkForm((prev) => ({
             ...prev,
-            operationUserId: prev.operationUserId || defaultOfficeId,
-            openedByUserId: prev.openedByUserId || defaultOfficeId,
+            operationUserId: prev.operationUserId || defaultOpsId,
+            openedByUserId: prev.openedByUserId || defaultOpenedById,
             assignedToUserId: isSuperAdminUser ? (prev.assignedToUserId || '') : '',
           }));
         }
@@ -435,7 +462,7 @@ export default function MapPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isBulkOpen, lookupsLoaded, partnerKey, isSuperAdminUser]);
+  }, [isBulkOpen, lookupsLoaded, partnerKey, isSuperAdminUser, requiresYesilPanoOps]);
 
   const filteredStations = useMemo(
     () =>
@@ -559,6 +586,10 @@ export default function MapPage() {
       alert('Operasyon Sorumlusu ve İş Açan Yetkili seçilmelidir.');
       return;
     }
+    if (requiresYesilPanoOps && operationSupervisors.length === 0) {
+      alert('Yeşil Pano operasyon sorumlusu listesi yüklenemedi. Sayfayı yenileyin veya yöneticinize bildirin.');
+      return;
+    }
     setIsSubmitting(true);
     const isSingle = selectedIds.length === 1;
     const attachmentsToUpload = isSingle ? [...openingAttachments] : [];
@@ -571,7 +602,7 @@ export default function MapPage() {
         address: bulkForm.address,
         priority: bulkForm.priority,
         type: bulkForm.type,
-        category: bulkForm.category,
+        category: bulkForm.isPeriodic ? 'Periyodik Bakım' : bulkForm.category,
         startDate: new Date(bulkForm.startDate).toISOString(),
         endDate: new Date(bulkForm.endDate).toISOString(),
         operationUserId: bulkForm.operationUserId || null,
@@ -596,7 +627,11 @@ export default function MapPage() {
       navigate('/work-orders');
     } catch (error) {
       console.error(error);
-      alert('Toplu iş emri oluşturulamadı.');
+      const msg =
+        axios.isAxiosError(error) && typeof error.response?.data?.message === 'string'
+          ? error.response.data.message
+          : 'Toplu iş emri oluşturulamadı.';
+      alert(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -784,7 +819,16 @@ export default function MapPage() {
               <div><label className="block text-xs font-bold mb-1">Mühendis Açıklaması</label><textarea rows={2} className="w-full border rounded-lg p-2.5" value={bulkForm.mobileDescription} onChange={(e) => setBulkForm({ ...bulkForm, mobileDescription: e.target.value })} /></div>
               <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
                 <label className="flex items-center gap-2 font-bold text-emerald-800 text-xs">
-                  <input type="checkbox" className="ga-checkbox" checked={bulkForm.isPeriodic} onChange={(e) => setBulkForm({ ...bulkForm, isPeriodic: e.target.checked })} />
+                  <input
+                    type="checkbox"
+                    className="ga-checkbox"
+                    checked={bulkForm.isPeriodic}
+                    onChange={(e) => setBulkForm({
+                      ...bulkForm,
+                      isPeriodic: e.target.checked,
+                      category: e.target.checked ? 'Periyodik Bakım' : bulkForm.category,
+                    })}
+                  />
                   Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)
                 </label>
                 {bulkForm.isPeriodic && (
@@ -798,8 +842,27 @@ export default function MapPage() {
               <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider">Operasyon Atamaları</h4>
                 <div className={`grid grid-cols-1 gap-3 ${isSuperAdminUser ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                  <div><label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-                  <div><label className="block text-xs font-bold mb-1">İş Açan Yetkili</label><select required className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}><option value="">Seçiniz</option>{operationAssigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Operasyon Sorumlusu</label>
+                    <select required className="w-full border rounded-lg p-2.5" value={bulkForm.operationUserId} onChange={(e) => setBulkForm({ ...bulkForm, operationUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>
+                      <option value="">Seçiniz</option>
+                      {(requiresYesilPanoOps ? operationSupervisorOptions : operationAssigneeOptions).map((p) => (
+                        <option key={p.id} value={p.id}>{p.fullName}</option>
+                      ))}
+                    </select>
+                    {requiresYesilPanoOps && (
+                      <p className="text-[10px] text-blue-700 font-medium mt-1">Trugo arıza kaydı: Yeşil Pano operasyon sorumlusu seçin (Kaan Bey vb.).</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">İş Açan Yetkili</label>
+                    <select required className="w-full border rounded-lg p-2.5" value={bulkForm.openedByUserId} onChange={(e) => setBulkForm({ ...bulkForm, openedByUserId: e.target.value })} disabled={lookupsLoading && !lookupsLoaded}>
+                      <option value="">Seçiniz</option>
+                      {openedByOptions.map((p) => (
+                        <option key={p.id} value={p.id}>{p.fullName}</option>
+                      ))}
+                    </select>
+                  </div>
                   {isSuperAdminUser && (
                     <div>
                       <label className="block text-xs font-bold mb-1">İş Atanan Sahacı</label>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api from '../services/api';
-import { isSuperAdmin } from '../utils/authSession';
+import { getAuthProfile, isSuperAdmin } from '../utils/authSession';
 import ModalOverlay from '../components/ModalOverlay';
 import PageLoading from '../components/PageLoading';
 import OpeningAttachmentsPicker from '../components/OpeningAttachmentsPicker';
@@ -47,6 +47,8 @@ interface PersonnelLookup {
 
 interface LookupData {
   personnel: PersonnelLookup[];
+  operationSupervisors: PersonnelLookup[];
+  officeUsers: PersonnelLookup[];
   types: string[];
   categories: string[];
 }
@@ -61,7 +63,13 @@ export default function Timesheet() {
 
   // Canlı Veri Havuzları
   const [orders, setOrders] = useState<CalendarWorkOrder[]>([]);
-  const [lookups, setLookups] = useState<LookupData>({ personnel: [], types: [], categories: [] });
+  const [lookups, setLookups] = useState<LookupData>({
+    personnel: [],
+    operationSupervisors: [],
+    officeUsers: [],
+    types: [],
+    categories: [],
+  });
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Form Çekmecesi Kontrolleri
@@ -107,19 +115,34 @@ export default function Timesheet() {
           const mappedPersonnel = backendData.teams
             ? backendData.teams.map((t: { id: string; name: string }) => ({ id: t.id, fullName: t.name }))
             : (backendData.personnel ?? []);
+          const mappedOps = (backendData.operationSupervisors ?? []).map(
+            (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
+          );
+          const mappedOffice = (backendData.officeUsers ?? []).map(
+            (u: { id: string; name: string }) => ({ id: u.id, fullName: u.name }),
+          );
 
           const normalizedLookups: LookupData = {
             personnel: mappedPersonnel,
+            operationSupervisors: mappedOps,
+            officeUsers: mappedOffice,
             types: backendData.types ?? ['Arıza', 'Bakım', 'Kurulum', 'Keşif', 'Saha Operasyonu'],
             categories: backendData.categories ?? ['Arıza Bildirimi', 'Periyodik Bakım', 'Devreye Alma', 'Altyapı İncelemesi'],
           };
           setLookups(normalizedLookups);
 
-          if (mappedPersonnel.length > 0) {
+          const meId = getAuthProfile()?.userId ?? '';
+          const defaultOpsId = mappedOps[0]?.id ?? mappedOffice[0]?.id ?? '';
+          const defaultOpenedById =
+            meId && [...mappedOffice, ...mappedOps].some((u) => u.id === meId)
+              ? meId
+              : (mappedOffice[0]?.id ?? meId);
+
+          if (defaultOpsId || defaultOpenedById) {
             setFormData(prev => ({
               ...prev,
-              operationUserId: mappedPersonnel[0].id,
-              openedByUserId: mappedPersonnel[0].id,
+              operationUserId: prev.operationUserId || defaultOpsId,
+              openedByUserId: prev.openedByUserId || defaultOpenedById,
               assignedToUserId: isSuperAdminUser ? (prev.assignedToUserId || '') : '',
             }));
           }
@@ -274,6 +297,10 @@ export default function Timesheet() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+    if (!formData.operationUserId) {
+      alert('Operasyon sorumlusu seçilmelidir (Yeşil Pano operasyoncu).');
+      return;
+    }
     setIsSubmitting(true);
     const attachmentsToUpload = [...openingAttachments];
     try {
@@ -496,7 +523,11 @@ export default function Timesheet() {
                 type="checkbox"
                 className="ga-checkbox ga-checkbox-accent-emerald"
                 checked={formData.isPeriodic}
-                onChange={e => setFormData({ ...formData, isPeriodic: e.target.checked })}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  isPeriodic: e.target.checked,
+                  workCategory: e.target.checked ? 'Periyodik Bakım' : formData.workCategory,
+                })}
               />
               <span>Bu Bir Periyodik İş Emridir (Otomatik Tekrarlansın)</span>
             </label>
@@ -521,8 +552,23 @@ export default function Timesheet() {
           
           <div className="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
             <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Operasyon Atamaları</h4>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({...formData, operationUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
-            <div><label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label><select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({...formData, openedByUserId: e.target.value})}>{lookups.personnel.map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">Operasyon Sorumlusu</label>
+              <select required className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.operationUserId} onChange={e => setFormData({ ...formData, operationUserId: e.target.value })}>
+                <option value="">Seçiniz</option>
+                {(lookups.operationSupervisors.length > 0 ? lookups.operationSupervisors : lookups.officeUsers).map((p) => (
+                  <option key={p.id} value={p.id}>{p.fullName}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Açan Yetkili</label>
+              <select className="w-full border border-slate-300 rounded-lg p-2 bg-white" value={formData.openedByUserId} onChange={e => setFormData({ ...formData, openedByUserId: e.target.value })}>
+                {(lookups.officeUsers.length > 0 ? lookups.officeUsers : lookups.operationSupervisors).map((p) => (
+                  <option key={p.id} value={p.id}>{p.fullName}</option>
+                ))}
+              </select>
+            </div>
             {isSuperAdminUser ? (
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">İş Atanan Sahacı</label>

@@ -53,6 +53,11 @@ const EMPTY_FORM: UserFormState = {
 
 const SUPER_ADMIN_ROLE = 'SuperAdmin';
 const PAGE_SIZE = 20;
+const PROTECTED_SYSTEM_EMAIL = 'admin@theobuz.com';
+
+function isProtectedSystemUser(user: Pick<UserRow, 'email'>): boolean {
+  return user.email.trim().toLowerCase() === PROTECTED_SYSTEM_EMAIL.toLowerCase();
+}
 
 type SortKey = 'fullName' | 'email' | 'username' | 'tenantName' | 'roles' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -100,6 +105,7 @@ function filterUsers(
 ): UserRow[] {
   const q = search.trim().toLowerCase();
   return list.filter((user) => {
+    if (isProtectedSystemUser(user)) return false;
     if (statusFilter === 'active' && !user.isActive) return false;
     if (statusFilter === 'inactive' && user.isActive) return false;
     if (tenantFilter && user.tenantId !== tenantFilter) return false;

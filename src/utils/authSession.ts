@@ -167,7 +167,20 @@ export function canManageStations(profile?: AuthProfile | null): boolean {
   return canCloseWorkOrderFromOffice(profile);
 }
 
-const TRUGO_TENANT_ID = 'c92cc573-957b-4862-8ae7-ff380efd15ce';
+export const TRUGO_TENANT_ID = 'c92cc573-957b-4862-8ae7-ff380efd15ce';
+
+/** Trugo / OperationReporter arıza açılışında Yeşil Pano operasyon sorumlusu zorunlu. */
+export function requiresYesilPanoOperationSupervisor(profile?: AuthProfile | null): boolean {
+  const p = profile ?? getAuthProfile();
+  if (!p || isSuperAdmin(p)) return false;
+  const tenantId = p.tenantId?.toLowerCase();
+  if (tenantId === TRUGO_TENANT_ID.toLowerCase()) return true;
+  const roles = p.roles ?? [];
+  const isReporterOnly =
+    roles.some((r) => r === 'OperationReporter')
+    && !roles.some((r) => r === 'SuperAdmin' || r === 'TenantAdmin' || r === 'OfficeUser');
+  return isReporterOnly;
+}
 
 /** Süper Admin veya Trugo kiracısı — EDAŞ listesine yeni isim ekleme */
 export function canManageEdasCompanies(profile?: AuthProfile | null): boolean {

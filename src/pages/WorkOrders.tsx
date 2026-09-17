@@ -60,11 +60,19 @@ interface WorkOrderData {
   translationProvider?: string | null;
   translatedAt?: string | null;
   createdAt?: string | null;
+  stationStatusType?: string | null;
+  periodLabel?: string | null;
+  parentWorkOrderId?: string | null;
 }
 
 function isTerminalWorkOrderStatus(status: string): boolean {
   const s = (status || '').toLowerCase();
   return s === 'tamamlandı' || s === 'iptal' || s === 'iptal edildi';
+}
+
+function stationStatusBadgeClass(statusType?: string | null): string {
+  if (statusType === 'Bakım Dışı') return 'text-slate-600 bg-slate-100 border-slate-300';
+  return 'text-emerald-700 bg-emerald-50 border-emerald-200';
 }
 
 type WorkOrderStatusFilterKey =
@@ -416,8 +424,33 @@ export default function WorkOrders() {
     setDisplayLang('tr');
   };
 
+  const isFutureTurkeyPeriod = (startDate?: string | null): boolean => {
+    if (!startDate?.trim()) return false;
+    const parsed = new Date(startDate.includes('T') ? startDate : `${startDate.replace(' ', 'T')}:00Z`);
+    if (Number.isNaN(parsed.getTime())) return false;
+    const tr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit' });
+    const orderParts = tr.formatToParts(parsed);
+    const nowParts = tr.formatToParts(new Date());
+    const orderYear = Number(orderParts.find((p) => p.type === 'year')?.value ?? '0');
+    const orderMonth = Number(orderParts.find((p) => p.type === 'month')?.value ?? '0');
+    const nowYear = Number(nowParts.find((p) => p.type === 'year')?.value ?? '0');
+    const nowMonth = Number(nowParts.find((p) => p.type === 'month')?.value ?? '0');
+    if (orderYear !== nowYear) return orderYear > nowYear;
+    return orderMonth > nowMonth;
+  };
+
   const handleOfficeClose = async (closeStatus: 'Tamamlandı' | 'İptal') => {
     if (!selectedOrder || isOfficeClosing) return;
+
+    const isPeriodicPeriod = !!selectedOrder.parentWorkOrderId || !!selectedOrder.isPeriodic;
+    if (isPeriodicPeriod && isFutureTurkeyPeriod(selectedOrder.startDate)) {
+      const periodLabel = selectedOrder.periodLabel ?? selectedOrder.startDate;
+      const ok = window.confirm(
+        `${periodLabel} dönemi henüz gelmedi. Ofisten yine de "${closeStatus}" olarak kapatmak istiyor musunuz?`,
+      );
+      if (!ok) return;
+    }
+
     setIsOfficeClosing(true);
     try {
       const { data } = await api.post<{
@@ -1045,6 +1078,14 @@ export default function WorkOrders() {
                     <span className="text-slate-500 font-medium shrink-0 w-18">Durum</span>
                     <span className="font-bold text-blue-600 truncate">{order.status || '-'}</span>
                   </div>
+                  {order.stationStatusType && (
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-slate-500 font-medium shrink-0 w-18">Nokta Durumu</span>
+                      <span className={`text-[11px] font-bold border rounded px-2 py-0.5 truncate ${stationStatusBadgeClass(order.stationStatusType)}`}>
+                        {order.stationStatusType}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-slate-500 font-medium shrink-0 w-18">Açılış Tarihi</span>
                     <span className="text-slate-800 font-medium truncate">
@@ -1173,6 +1214,14 @@ export default function WorkOrders() {
                 ) : (
                   <input disabled className="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-lg p-2.5 cursor-not-allowed" value={selectedOrder.category} />
                 )}
+              </div>
+              <div>
+                <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Nokta Durumu (Bakım Kapsamı)</label>
+                <input
+                  disabled
+                  className={`w-full border font-bold rounded-lg p-2.5 cursor-not-allowed ${stationStatusBadgeClass(selectedOrder.stationStatusType)}`}
+                  value={selectedOrder.stationStatusType || 'Bakıma Dahil'}
+                />
               </div>
               <div>
                 <label className="block font-bold text-slate-500 mb-1 uppercase tracking-wider">Planlanan Başlangıç</label>

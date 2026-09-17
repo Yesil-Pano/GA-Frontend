@@ -52,9 +52,12 @@ interface AssignedWorkOrder {
   status: string;
   type: string;
   plannedDate: string;
+  startDate?: string;
   assignedToUserId: string | null;
   isPeriodic?: boolean;
   parentWorkOrderId?: string | null;
+  periodLabel?: string | null;
+  stationStatusType?: string | null;
 }
 
 interface PeriodicOccurrence {
@@ -89,7 +92,7 @@ interface AxiosErrorResponse {
   };
 }
 
-type AssignedJobStatusFilter = 'Tümü' | 'Bekliyor' | 'Devam Ediyor' | 'Tamamlandı' | 'İptal';
+type AssignedJobStatusFilter = 'Tümü' | 'Bekliyor' | 'Devam Ediyor';
 
 const ASSIGNED_JOB_STATUS_ORDER: Record<string, number> = {
   'Devam Ediyor': 0,
@@ -103,9 +106,24 @@ const ASSIGNED_JOB_STATUS_FILTERS: { key: AssignedJobStatusFilter; label: string
   { key: 'Tümü', label: 'Tümü', active: 'bg-brand-navy text-white border-brand-navy', idle: 'bg-white text-slate-600 border-slate-200 hover:border-slate-300' },
   { key: 'Devam Ediyor', label: 'Devam Ediyor', active: 'bg-blue-600 text-white border-blue-600', idle: 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300' },
   { key: 'Bekliyor', label: 'Bekliyor', active: 'bg-amber-500 text-white border-amber-500', idle: 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-300' },
-  { key: 'Tamamlandı', label: 'Tamamlandı', active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-300' },
-  { key: 'İptal', label: 'İptal', active: 'bg-rose-600 text-white border-rose-600', idle: 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300' },
 ];
+
+function isTerminalAssignedJobStatus(status: string): boolean {
+  const s = (status || '').trim();
+  return s === 'Tamamlandı' || s === 'İptal' || s === 'İptal Edildi';
+}
+
+/** Ekip kartında yalnızca aktif dönem / tekil iş satırları (periyodik şablon hariç). */
+function shouldShowOnTeamAssignedJobsList(order: AssignedWorkOrder): boolean {
+  if (isTerminalAssignedJobStatus(order.status)) return false;
+  if (order.isPeriodic && !order.parentWorkOrderId) return false;
+  return true;
+}
+
+function stationStatusBadgeClass(statusType?: string | null): string {
+  if (statusType === 'Bakım Dışı') return 'text-slate-600 bg-slate-100 border-slate-300';
+  return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+}
 
 function assignedJobSortKey(status: string): number {
   return ASSIGNED_JOB_STATUS_ORDER[status] ?? 4;
@@ -113,7 +131,6 @@ function assignedJobSortKey(status: string): number {
 
 function matchesAssignedJobStatusFilter(status: string, filter: AssignedJobStatusFilter): boolean {
   if (filter === 'Tümü') return true;
-  if (filter === 'İptal') return status === 'İptal' || status === 'İptal Edildi';
   return status === filter;
 }
 
@@ -480,7 +497,8 @@ export default function Teams() {
     () =>
       allWorkOrders.filter(
         (order) =>
-          order.assignedToUserId === selectedTeam?.id && !order.parentWorkOrderId,
+          order.assignedToUserId === selectedTeam?.id
+          && shouldShowOnTeamAssignedJobsList(order),
       ),
     [allWorkOrders, selectedTeam?.id],
   );
@@ -530,7 +548,7 @@ export default function Teams() {
     setPeriodicLoading(true);
     setPeriodicOccurrences([]);
     try {
-      const templateId = job.isPeriodic ? job.id : (job.parentWorkOrderId ?? job.id);
+      const templateId = job.parentWorkOrderId ?? job.id;
       const { data } = await api.get<{ occurrences: PeriodicOccurrence[] }>(
         `/workorders/${templateId}/occurrences`,
       );
@@ -1174,11 +1192,19 @@ export default function Teams() {
                       <div key={job.id} className="border border-slate-200 bg-slate-50 rounded-xl p-3 flex justify-between items-center shadow-sm gap-3">
                         <div className="space-y-1 min-w-0">
                           <h4 className="font-bold text-brand-navy text-sm truncate">{job.customerName}</h4>
-                          <p className="text-slate-500 text-[11px] font-medium truncate">Özet: {job.title} | Tip: <span className="font-bold">{job.type}</span></p>
+                          <p className="text-slate-500 text-[11px] font-medium truncate">
+                            Özet: {job.title} | Tip: <span className="font-bold">{job.type}</span>
+                            {job.periodLabel ? <> | Dönem: <span className="font-bold">{job.periodLabel}</span></> : null}
+                          </p>
+                          {job.stationStatusType && (
+                            <span className={`inline-block text-[10px] font-semibold border rounded px-1.5 py-0.5 ${stationStatusBadgeClass(job.stationStatusType)}`}>
+                              {job.stationStatusType}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className={`text-[10px] font-semibold border rounded px-1.5 py-0.5 ${jobStatusBadgeClass(job.status)}`}>{job.status}</span>
-                          {isSuperAdminUser && job.isPeriodic && !job.parentWorkOrderId && (
+                          {isSuperAdminUser && (job.parentWorkOrderId || job.isPeriodic) && (
                             <button
                               type="button"
                               onClick={() => openPeriodicModal(job)}
